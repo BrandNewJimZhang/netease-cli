@@ -10,10 +10,10 @@
 //   - stderr: one {"error_class","message"} line on failure
 //   - exit 0 ok / 3 bad input / 4 upstream refused
 //
-// Not implemented on purpose: login flows (read an existing cookie via
-// MUSICFOX_COOKIE) and UnblockNeteaseMusic (SkipUNM is always true —
-// this tool plays what your account may already play, and does not
-// unlock paid content).
+// Not implemented on purpose: login flows (an existing session is read
+// from MUSICFOX_COOKIE — see cookie.go) and UnblockNeteaseMusic (SkipUNM
+// is always true — this tool plays what your account may already play,
+// and does not unlock paid content).
 
 package main
 
@@ -46,6 +46,10 @@ print {"error_class","message"} on stderr and exit 3 (bad input) or
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
+		os.Exit(exitBadInput)
+	}
+	if err := applyCookieEnv(); err != nil {
+		failInput(err.Error())
 		os.Exit(exitBadInput)
 	}
 	switch os.Args[1] {

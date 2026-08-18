@@ -31,7 +31,7 @@ Every success prints one envelope on stdout:
 
 | Verb     | `data` shape |
 |----------|--------------|
-| `search` | `[{id, title, artist, album, duration}]` — duration in milliseconds, multiple artists joined with ` / ` |
+| `search` | `[{id, title, artist, album, cover, duration}]` — duration in milliseconds, multiple artists joined with ` / `, `cover` an album-art URL or `""` |
 | `url`    | `{id, url, quality}` |
 | `lyric`  | `{id, lrc}` — LRC document, `""` when the track has none |
 
@@ -53,7 +53,8 @@ Failures print one line on stderr and exit non-zero:
 
 - **No login flow.** Search, most lyrics and free-track URLs work
   unauthenticated. For your own account's catalogue, export its cookie
-  into `MUSICFOX_COOKIE` (the same variable go-musicfox reads).
+  into `MUSICFOX_COOKIE` (a Cookie-header string, e.g. `MUSIC_U=...`);
+  this CLI parses it and installs it as the request session.
 - **No unlocking.** `SkipUNM` is pinned true, so paid or region-locked
   tracks answer exit 4 rather than being routed around. The
   UnblockNeteaseMusic package arrives as a transitive dependency of the

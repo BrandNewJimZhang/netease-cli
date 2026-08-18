@@ -24,6 +24,7 @@ type Track struct {
 	Title    string `json:"title"`
 	Artist   string `json:"artist"`
 	Album    string `json:"album"`
+	Cover    string `json:"cover"` // album art URL, "" when upstream has none
 	Duration int64  `json:"duration"` // milliseconds, as upstream reports
 }
 
@@ -74,7 +75,8 @@ func mapSearchResponse(body []byte) ([]Track, error) {
 					Name string `json:"name"`
 				} `json:"ar"`
 				Al struct {
-					Name string `json:"name"`
+					Name   string `json:"name"`
+					PicURL string `json:"picUrl"`
 				} `json:"al"`
 			} `json:"songs"`
 		} `json:"result"`
@@ -95,6 +97,7 @@ func mapSearchResponse(body []byte) ([]Track, error) {
 			Title:    song.Name,
 			Artist:   strings.Join(names, " / "),
 			Album:    song.Al.Name,
+			Cover:    song.Al.PicURL,
 			Duration: song.Dt,
 		})
 	}

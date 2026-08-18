@@ -11,7 +11,7 @@ import (
 
 const searchFixture = `{"result":{"songs":[
   {"id":3339230677,"name":"晴天","dt":182890,
-   "ar":[{"name":"周杰伦"}],"al":{"name":"叶惠美"}},
+   "ar":[{"name":"周杰伦"}],"al":{"name":"叶惠美","picUrl":"https://p1.music.126.net/cover.jpg"}},
   {"id":186016,"name":"晴天娃娃","dt":210000,
    "ar":[{"name":"歌手A"},{"name":"歌手B"}],"al":{"name":"专辑B"}}
 ]},"code":200}`
@@ -47,9 +47,44 @@ func TestMapSearchResponse(t *testing.T) {
 	if first.Duration != 182890 {
 		t.Errorf("duration: want ms 182890, got %d", first.Duration)
 	}
+	if first.Cover != "https://p1.music.126.net/cover.jpg" {
+		t.Errorf("cover: got %q", first.Cover)
+	}
 	// Several artists join with " / " so the row stays one line.
 	if tracks[1].Artist != "歌手A / 歌手B" {
 		t.Errorf("multi-artist join: got %q", tracks[1].Artist)
+	}
+	// A track whose album carries no art publishes "", not a fabricated URL.
+	if tracks[1].Cover != "" {
+		t.Errorf("missing cover must stay empty, got %q", tracks[1].Cover)
+	}
+}
+
+func TestParseCookieHeader(t *testing.T) {
+	cookies, err := parseCookieHeader("MUSIC_U=abc123; __csrf=x9")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cookies) != 2 {
+		t.Fatalf("want 2 cookies, got %d", len(cookies))
+	}
+	if cookies[0].Name != "MUSIC_U" || cookies[0].Value != "abc123" {
+		t.Errorf("first cookie: got %s=%s", cookies[0].Name, cookies[0].Value)
+	}
+	// Domain-scoped so the jar answers for every netease subdomain.
+	if cookies[0].Domain != ".music.163.com" {
+		t.Errorf("domain: got %q", cookies[0].Domain)
+	}
+}
+
+func TestParseCookieHeaderMalformedPairRaises(t *testing.T) {
+	// A dropped MUSIC_U would read as "logged in but every track
+	// refused" — malformed input must fail loudly, not shrink.
+	if _, err := parseCookieHeader("MUSIC_U"); err == nil {
+		t.Fatal("pair without '=' must raise")
+	}
+	if _, err := parseCookieHeader(" ; ; "); err == nil {
+		t.Fatal("no pairs at all must raise")
 	}
 }
 
