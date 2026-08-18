@@ -21,6 +21,12 @@ const urlFixture = `{"data":[{"id":3339230677,
 
 const urlNullFixture = `{"data":[{"id":1,"url":null,"br":0}],"code":200}`
 
+const accountFixture = `{"code":200,
+  "account":{"id":123,"vipType":11},
+  "profile":{"userId":123,"nickname":"Jim","vipType":11}}`
+
+const accountAnonymousFixture = `{"code":200,"account":null,"profile":null}`
+
 const lyricFixture = `{"lrc":{"lyric":"[00:01.00]故事的小黄花\n[00:12.50]从出生那年"},"code":200}`
 
 func TestMapSearchResponse(t *testing.T) {
@@ -188,5 +194,39 @@ func TestErrorEnvelopeShape(t *testing.T) {
 	}
 	if probe.ErrorClass != "upstream_rejected" || probe.Message != "login expired" {
 		t.Errorf("error envelope: got %+v", probe)
+	}
+}
+
+func TestMapAccountResponseSignedIn(t *testing.T) {
+	session, err := mapAccountResponse([]byte(accountFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !session.LoggedIn {
+		t.Fatal("signed-in fixture must read LoggedIn")
+	}
+	if session.Nickname != "Jim" {
+		t.Errorf("nickname: got %q", session.Nickname)
+	}
+	if !session.VIP {
+		t.Error("vipType 11 must read VIP")
+	}
+}
+
+func TestMapAccountResponseAnonymousIsNotAnError(t *testing.T) {
+	// Anonymous (or a rejected cookie) answers profile null under a
+	// 200 — that IS the "not signed in" verdict the caller needs.
+	session, err := mapAccountResponse([]byte(accountAnonymousFixture))
+	if err != nil {
+		t.Fatalf("anonymous is a valid verdict, got error: %v", err)
+	}
+	if session.LoggedIn {
+		t.Fatal("anonymous must not read LoggedIn")
+	}
+}
+
+func TestMapAccountResponseCorrupt(t *testing.T) {
+	if _, err := mapAccountResponse([]byte(`not json`)); err == nil {
+		t.Fatal("corrupt body must raise, not degrade to anonymous")
 	}
 }

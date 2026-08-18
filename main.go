@@ -1,6 +1,6 @@
 // netease-cli — an agent-native resolver for NetEase Cloud Music.
 //
-// Three read-only verbs (search / url / lyric) over the
+// Four read-only verbs (search / url / lyric / whoami) over the
 // go-musicfox/netease-music library, each answering one JSON envelope
 // on stdout. Written for AutoSkill's music app, which drives it as a
 // host-existing binary off PATH — the same posture lark-cli has.
@@ -38,6 +38,7 @@ usage:
   netease-cli search --keyword <text> [--limit N] [--format json]
   netease-cli url    --id <track-id> [--quality <bitrate>] [--format json]
   netease-cli lyric  --id <track-id> [--format json]
+  netease-cli whoami [--format json]
 
 Every verb prints {"schema_version":1,"data":...} on stdout. Failures
 print {"error_class","message"} on stderr and exit 3 (bad input) or
@@ -59,6 +60,8 @@ func main() {
 		os.Exit(runURL(os.Args[2:]))
 	case "lyric":
 		os.Exit(runLyric(os.Args[2:]))
+	case "whoami":
+		os.Exit(runWhoami(os.Args[2:]))
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		os.Exit(exitOK)
@@ -179,6 +182,32 @@ func runURL(args []string) int {
 		return exitUpstreamRefuse
 	}
 	return emit(resolved)
+}
+
+func runWhoami(args []string) int {
+	fs := flag.NewFlagSet("whoami", flag.ContinueOnError)
+	format := formatFlag(fs)
+	if err := fs.Parse(args); err != nil {
+		failInput(err.Error())
+		return exitBadInput
+	}
+	if err := checkFormat(*format); err != nil {
+		failInput(err.Error())
+		return exitBadInput
+	}
+
+	svc := &service.UserAccountService{}
+	code, body := svc.AccountInfo()
+	if code != 200 {
+		failUpstream(fmt.Sprintf("account rejected with code %v", code))
+		return exitUpstreamRefuse
+	}
+	session, err := mapAccountResponse(body)
+	if err != nil {
+		failUpstream(err.Error())
+		return exitUpstreamRefuse
+	}
+	return emit(session)
 }
 
 func runLyric(args []string) int {

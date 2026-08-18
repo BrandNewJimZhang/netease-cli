@@ -1,6 +1,6 @@
 # netease-cli
 
-An agent-native resolver for NetEase Cloud Music: three read-only verbs
+An agent-native resolver for NetEase Cloud Music: four read-only verbs
 that answer JSON, built for [AutoSkill](https://github.com/)'s music app
 but usable by any caller that speaks shell.
 
@@ -19,6 +19,7 @@ cp netease-cli /usr/local/bin/    # or anywhere on PATH
 netease-cli search --keyword "周杰伦 晴天" --limit 20
 netease-cli url    --id 186016 [--quality 320000]
 netease-cli lyric  --id 186016
+netease-cli whoami
 ```
 
 ## Contract
@@ -34,6 +35,7 @@ Every success prints one envelope on stdout:
 | `search` | `[{id, title, artist, album, cover, duration}]` — duration in milliseconds, multiple artists joined with ` / `, `cover` an album-art URL or `""` |
 | `url`    | `{id, url, quality}` |
 | `lyric`  | `{id, lrc}` — LRC document, `""` when the track has none |
+| `whoami` | `{logged_in, nickname, vip}` — who `MUSICFOX_COOKIE` authenticates as; anonymous and rejected cookies both answer `logged_in: false` |
 
 Failures print one line on stderr and exit non-zero:
 

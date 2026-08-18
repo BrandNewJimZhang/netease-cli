@@ -41,6 +41,15 @@ type Lyric struct {
 	LRC string `json:"lrc"`
 }
 
+// Session is the whoami verdict: who the exported cookie authenticates
+// as. Anonymous and rejected cookies both read LoggedIn false — that is
+// the verdict a caller's login verification needs.
+type Session struct {
+	LoggedIn bool   `json:"logged_in"`
+	Nickname string `json:"nickname"`
+	VIP      bool   `json:"vip"`
+}
+
 type envelope struct {
 	SchemaVersion int `json:"schema_version"`
 	Data          any `json:"data"`
@@ -102,6 +111,32 @@ func mapSearchResponse(body []byte) ([]Track, error) {
 		})
 	}
 	return tracks, nil
+}
+
+// mapAccountResponse decodes /api/nuser/account/get into a Session.
+//
+// A signed-in session carries a profile object; anonymous (or a cookie
+// the server rejected) answers profile null under the same 200 — so
+// null profile IS the "not signed in" verdict, not an error. A body
+// that does not parse is corrupt and raises.
+func mapAccountResponse(body []byte) (Session, error) {
+	var parsed struct {
+		Profile *struct {
+			Nickname string `json:"nickname"`
+			VipType  int64  `json:"vipType"`
+		} `json:"profile"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return Session{}, fmt.Errorf("account response is not valid JSON: %w", err)
+	}
+	if parsed.Profile == nil {
+		return Session{}, nil
+	}
+	return Session{
+		LoggedIn: true,
+		Nickname: parsed.Profile.Nickname,
+		VIP:      parsed.Profile.VipType > 0,
+	}, nil
 }
 
 // qualityLabel renders an upstream bitrate as the label the panel shows.
