@@ -1,0 +1,157 @@
+package main
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+// Fixtures are trimmed captures of real NetEase responses (probed
+// 2026-08-18), so the mappers are pinned against the upstream shape
+// rather than an invented one.
+
+const searchFixture = `{"result":{"songs":[
+  {"id":3339230677,"name":"晴天","dt":182890,
+   "ar":[{"name":"周杰伦"}],"al":{"name":"叶惠美"}},
+  {"id":186016,"name":"晴天娃娃","dt":210000,
+   "ar":[{"name":"歌手A"},{"name":"歌手B"}],"al":{"name":"专辑B"}}
+]},"code":200}`
+
+const urlFixture = `{"data":[{"id":3339230677,
+  "url":"http://m701.music.126.net/x.mp3","br":320000,"type":"mp3"}],"code":200}`
+
+const urlNullFixture = `{"data":[{"id":1,"url":null,"br":0}],"code":200}`
+
+const lyricFixture = `{"lrc":{"lyric":"[00:01.00]故事的小黄花\n[00:12.50]从出生那年"},"code":200}`
+
+func TestMapSearchResponse(t *testing.T) {
+	tracks, err := mapSearchResponse([]byte(searchFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tracks) != 2 {
+		t.Fatalf("want 2 tracks, got %d", len(tracks))
+	}
+	first := tracks[0]
+	if first.ID != "3339230677" {
+		t.Errorf("id: want string 3339230677, got %q", first.ID)
+	}
+	if first.Title != "晴天" {
+		t.Errorf("title: got %q", first.Title)
+	}
+	if first.Artist != "周杰伦" {
+		t.Errorf("artist: got %q", first.Artist)
+	}
+	if first.Album != "叶惠美" {
+		t.Errorf("album: got %q", first.Album)
+	}
+	if first.Duration != 182890 {
+		t.Errorf("duration: want ms 182890, got %d", first.Duration)
+	}
+	// Several artists join with " / " so the row stays one line.
+	if tracks[1].Artist != "歌手A / 歌手B" {
+		t.Errorf("multi-artist join: got %q", tracks[1].Artist)
+	}
+}
+
+func TestMapSearchResponseEmpty(t *testing.T) {
+	tracks, err := mapSearchResponse([]byte(`{"result":{"songs":[]},"code":200}`))
+	if err != nil {
+		t.Fatalf("an empty result is valid, got error: %v", err)
+	}
+	if len(tracks) != 0 {
+		t.Fatalf("want 0 tracks, got %d", len(tracks))
+	}
+}
+
+func TestMapSearchResponseCorrupt(t *testing.T) {
+	if _, err := mapSearchResponse([]byte(`not json`)); err == nil {
+		t.Fatal("corrupt body must raise, not degrade to empty")
+	}
+}
+
+func TestMapUrlResponse(t *testing.T) {
+	got, err := mapUrlResponse([]byte(urlFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ID != "3339230677" {
+		t.Errorf("id: got %q", got.ID)
+	}
+	if got.URL != "http://m701.music.126.net/x.mp3" {
+		t.Errorf("url: got %q", got.URL)
+	}
+	if got.Quality != "320k" {
+		t.Errorf("quality: want 320k, got %q", got.Quality)
+	}
+}
+
+func TestMapUrlResponseNullIsUpstreamRejection(t *testing.T) {
+	// A paid / region-locked track answers 200 with a null url. That is
+	// an upstream refusal, not a normal result: returning it as an empty
+	// string would hand mpv nothing to play and read as our bug.
+	_, err := mapUrlResponse([]byte(urlNullFixture))
+	if err == nil {
+		t.Fatal("a null url must raise")
+	}
+}
+
+func TestMapLyricResponse(t *testing.T) {
+	lrc, err := mapLyricResponse([]byte(lyricFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lrc != "[00:01.00]故事的小黄花\n[00:12.50]从出生那年" {
+		t.Errorf("lrc: got %q", lrc)
+	}
+}
+
+func TestMapLyricResponseMissingIsEmpty(t *testing.T) {
+	// A track with no lyric is the common case, not a failure.
+	lrc, err := mapLyricResponse([]byte(`{"code":200}`))
+	if err != nil {
+		t.Fatalf("missing lyric must not raise: %v", err)
+	}
+	if lrc != "" {
+		t.Errorf("want empty lrc, got %q", lrc)
+	}
+}
+
+func TestEnvelopeCarriesSchemaVersion(t *testing.T) {
+	// The contract the AutoSkill runner unwraps: every success payload
+	// is {"schema_version":1,"data":...}.
+	out, err := json.Marshal(newEnvelope([]Track{{ID: "1", Title: "t"}}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var probe struct {
+		SchemaVersion int             `json:"schema_version"`
+		Data          json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(out, &probe); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if probe.SchemaVersion != 1 {
+		t.Errorf("schema_version: want 1, got %d", probe.SchemaVersion)
+	}
+	if len(probe.Data) == 0 {
+		t.Error("data must be present")
+	}
+}
+
+func TestErrorEnvelopeShape(t *testing.T) {
+	// stderr contract: one structured {"error_class","message"} line.
+	out, err := json.Marshal(newErrorEnvelope("upstream_rejected", "login expired"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var probe struct {
+		ErrorClass string `json:"error_class"`
+		Message    string `json:"message"`
+	}
+	if err := json.Unmarshal(out, &probe); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if probe.ErrorClass != "upstream_rejected" || probe.Message != "login expired" {
+		t.Errorf("error envelope: got %+v", probe)
+	}
+}
