@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -228,5 +231,88 @@ func TestMapAccountResponseAnonymousIsNotAnError(t *testing.T) {
 func TestMapAccountResponseCorrupt(t *testing.T) {
 	if _, err := mapAccountResponse([]byte(`not json`)); err == nil {
 		t.Fatal("corrupt body must raise, not degrade to anonymous")
+	}
+}
+
+// The four codes NetEase's qrcode/client/login answers, captured from
+// the upstream service. 803 is the only one that carries a session.
+const qrWaitingFixture = `{"code":801,"message":"等待扫码"}`
+const qrScannedFixture = `{"code":802,"message":"待确认","nickname":"Jim"}`
+const qrExpiredFixture = `{"code":800,"message":"二维码不存在或已过期"}`
+const qrAuthorizedFixture = `{"code":803,"message":"授权登录成功"}`
+
+func TestMapQRStatusNamesEveryEvent(t *testing.T) {
+	// Every upstream code maps to a state the caller branches on:
+	// "keep polling" (pending/scanned) vs "start over" (expired/
+	// refused). The names match qq-cli's — one schema, two resolvers.
+	cases := map[string]string{
+		qrWaitingFixture:    "pending",
+		qrScannedFixture:    "scanned",
+		qrExpiredFixture:    "expired",
+		qrAuthorizedFixture: "done",
+	}
+	for fixture, want := range cases {
+		state, err := mapQRStatusResponse([]byte(fixture))
+		if err != nil {
+			t.Fatalf("unexpected error for %s: %v", fixture, err)
+		}
+		if state != want {
+			t.Errorf("state for %s: want %q, got %q", fixture, want, state)
+		}
+	}
+}
+
+func TestMapQRStatusUnknownCodeRaises(t *testing.T) {
+	// A code this mapper does not know must stop the flow rather than
+	// default to "pending" — a caller told to keep polling a code
+	// upstream has stopped honouring spins until its own timeout.
+	if _, err := mapQRStatusResponse([]byte(`{"code":999}`)); err == nil {
+		t.Fatal("want an error for an unknown status code")
+	}
+}
+
+func TestMapQRStatusCorrupt(t *testing.T) {
+	if _, err := mapQRStatusResponse([]byte("not json")); err == nil {
+		t.Fatal("want an error for a corrupt body")
+	}
+}
+
+func TestRenderCookieHeader(t *testing.T) {
+	// The credential this resolver publishes is exactly what it accepts
+	// back through MUSICFOX_COOKIE — a round trip, not a second format.
+	cookies := []*http.Cookie{
+		{Name: "MUSIC_U", Value: "abc"},
+		{Name: "__csrf", Value: "xyz"},
+	}
+	if got := renderCookieHeader(cookies); got != "MUSIC_U=abc; __csrf=xyz" {
+		t.Errorf("cookie header: got %q", got)
+	}
+}
+
+func TestRenderCookieHeaderRoundTripsThroughTheParser(t *testing.T) {
+	rendered := renderCookieHeader([]*http.Cookie{{Name: "MUSIC_U", Value: "abc"}})
+	parsed, err := parseCookieHeader(rendered)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if len(parsed) != 1 || parsed[0].Name != "MUSIC_U" || parsed[0].Value != "abc" {
+		t.Errorf("round trip lost the session: %+v", parsed)
+	}
+}
+
+func TestEncodeQRImageProducesAPNG(t *testing.T) {
+	// The panel renders one image for either resolver, so this one
+	// encodes the login URL rather than publishing a bare link that
+	// only netease's flow would carry.
+	encoded, err := encodeQRImage("http://music.163.com/login?codekey=abc")
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("published image is not base64: %v", err)
+	}
+	if !bytes.HasPrefix(raw, []byte("\x89PNG")) {
+		t.Errorf("published image is not a PNG: % x", raw[:8])
 	}
 }

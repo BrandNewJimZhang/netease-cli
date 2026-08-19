@@ -195,3 +195,38 @@ func mapLyricResponse(body []byte) (string, error) {
 	}
 	return parsed.Lrc.Lyric, nil
 }
+
+// qrStates maps NetEase's qrcode/client/login status code to the state
+// the caller branches on. The names match qq-cli's — one schema, two
+// resolvers, one panel that need not know which answered.
+//
+// 801/802 mean "keep polling"; 800 means the code is dead and a new one
+// must be minted. NetEase has no distinct "user refused" code (a
+// refusal simply lets the code expire), so `refused` is a state this
+// resolver never publishes while qq-cli does — the caller handles both
+// the same way regardless.
+var qrStates = map[int64]string{
+	800: "expired",
+	801: "pending",
+	802: "scanned",
+	803: "done",
+}
+
+// mapQRStatusResponse decodes one poll body into its published state.
+//
+// A code this mapper does not know raises rather than defaulting to
+// "pending": a caller told to keep polling a code upstream has stopped
+// honouring would spin until its own timeout with nothing to show.
+func mapQRStatusResponse(body []byte) (string, error) {
+	var parsed struct {
+		Code int64 `json:"code"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("qr status response is not valid JSON: %w", err)
+	}
+	state, known := qrStates[parsed.Code]
+	if !known {
+		return "", fmt.Errorf("unknown qr status code %d", parsed.Code)
+	}
+	return state, nil
+}

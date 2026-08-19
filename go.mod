@@ -2,7 +2,10 @@ module github.com/jimzhang/netease-cli
 
 go 1.26.6
 
-require github.com/go-musicfox/netease-music v1.6.0
+require (
+	github.com/go-musicfox/netease-music v1.6.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+)
 
 require (
 	github.com/buger/jsonparser v1.1.1 // indirect

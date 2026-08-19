@@ -1,19 +1,22 @@
 // netease-cli — an agent-native resolver for NetEase Cloud Music.
 //
-// Four read-only verbs (search / url / lyric / whoami) over the
-// go-musicfox/netease-music library, each answering one JSON envelope
-// on stdout. Written for AutoSkill's music app, which drives it as a
-// host-existing binary off PATH — the same posture lark-cli has.
+// Read-only resolution (search / url / lyric / whoami) plus the login
+// lifecycle its session needs (login start / login poll / refresh) over
+// the go-musicfox/netease-music library, each answering one JSON
+// envelope on stdout. Written for AutoSkill's music app, which drives it
+// as a host-existing binary off PATH — the same posture lark-cli has.
 //
 // Contract (mirrored by the AutoSkill runner's tests):
 //   - stdout: {"schema_version":1,"data":<payload>}
 //   - stderr: one {"error_class","message"} line on failure
 //   - exit 0 ok / 3 bad input / 4 upstream refused
 //
-// Not implemented on purpose: login flows (an existing session is read
-// from MUSICFOX_COOKIE — see cookie.go) and UnblockNeteaseMusic (SkipUNM
-// is always true — this tool plays what your account may already play,
-// and does not unlock paid content).
+// A session is read from MUSICFOX_COOKIE (see cookie.go) and is exactly
+// what `login poll` publishes on success — one format, one round trip.
+//
+// Not implemented on purpose: UnblockNeteaseMusic (SkipUNM is always
+// true — this tool plays what your account may already play, and does
+// not unlock paid content).
 
 package main
 
@@ -40,6 +43,10 @@ usage:
   netease-cli lyric  --id <track-id> [--format json]
   netease-cli whoami [--format json]
 
+  netease-cli login start [--format json]
+  netease-cli login poll  --identifier <token> [--format json]
+  netease-cli refresh [--format json]
+
 Every verb prints {"schema_version":1,"data":...} on stdout. Failures
 print {"error_class","message"} on stderr and exit 3 (bad input) or
 4 (upstream refused).`
@@ -62,6 +69,22 @@ func main() {
 		os.Exit(runLyric(os.Args[2:]))
 	case "whoami":
 		os.Exit(runWhoami(os.Args[2:]))
+	case "refresh":
+		os.Exit(runRefresh(os.Args[2:]))
+	case "login":
+		if len(os.Args) < 3 {
+			failInput("login needs a subcommand: start or poll")
+			os.Exit(exitBadInput)
+		}
+		switch os.Args[2] {
+		case "start":
+			os.Exit(runLoginStart(os.Args[3:]))
+		case "poll":
+			os.Exit(runLoginPoll(os.Args[3:]))
+		default:
+			failInput(fmt.Sprintf("unknown login subcommand %q; want start or poll", os.Args[2]))
+			os.Exit(exitBadInput)
+		}
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		os.Exit(exitOK)

@@ -1,8 +1,9 @@
 # netease-cli
 
-An agent-native resolver for NetEase Cloud Music: four read-only verbs
-that answer JSON, built for [AutoSkill](https://github.com/)'s music app
-but usable by any caller that speaks shell.
+An agent-native resolver for NetEase Cloud Music: read-only verbs that
+answer JSON, plus the login lifecycle their session needs. Built for
+[AutoSkill](https://github.com/)'s music app but usable by any caller
+that speaks shell.
 
 Wraps [go-musicfox/netease-music](https://github.com/go-musicfox/netease-music).
 
@@ -20,6 +21,10 @@ netease-cli search --keyword "周杰伦 晴天" --limit 20
 netease-cli url    --id 186016 [--quality 320000]
 netease-cli lyric  --id 186016
 netease-cli whoami
+
+netease-cli login start
+netease-cli login poll  --identifier <token from start>
+netease-cli refresh
 ```
 
 ## Contract
@@ -36,6 +41,9 @@ Every success prints one envelope on stdout:
 | `url`    | `{id, url, quality}` |
 | `lyric`  | `{id, lrc}` — LRC document, `""` when the track has none |
 | `whoami` | `{logged_in, nickname, vip}` — who `MUSICFOX_COOKIE` authenticates as; anonymous and rejected cookies both answer `logged_in: false` |
+| `login start` | `{identifier, login_type, mimetype, image_base64}` — the QR to render and the token to poll it by |
+| `login poll` | `{state, credential}` — `state` is one of `pending` / `scanned` / `done` / `expired`; `credential` is `{cookie}`, non-null only on `done` |
+| `refresh` | `{cookie}` — the renewed session, same shape `login poll` publishes on `done` |
 
 Failures print one line on stderr and exit non-zero:
 
@@ -46,17 +54,34 @@ Failures print one line on stderr and exit non-zero:
 | Exit | Meaning |
 |------|---------|
 | 0    | ok |
-| 3    | bad input (missing/invalid flag, unknown command) |
+| 3    | bad input (missing/invalid flag, unknown command, nothing to renew) |
 | 4    | upstream refused (non-200, unparseable body, no playable url) |
 
-`error_class` is `bad_input` or `upstream_rejected`.
+| `error_class`        | Exit | Meaning |
+|----------------------|------|---------|
+| `bad_input`          | 3    | malformed flag or unknown command |
+| `credential_missing` | 3    | `refresh` with `MUSICFOX_COOKIE` unset |
+| `credential_expired` | 4    | upstream refused the renewal (code 301) — sign in again |
+| `upstream_rejected`  | 4    | non-200, unparseable body, no playable url |
 
 ## Scope and limits
 
-- **No login flow.** Search, most lyrics and free-track URLs work
-  unauthenticated. For your own account's catalogue, export its cookie
+- **Sessions.** Search, most lyrics and free-track URLs work
+  unauthenticated. For your own account's catalogue, export a session
   into `MUSICFOX_COOKIE` (a Cookie-header string, e.g. `MUSIC_U=...`);
-  this CLI parses it and installs it as the request session.
+  this CLI parses it and installs it as the request session. That string
+  is exactly what `login poll` publishes on `done` and what `refresh`
+  republishes — one format, one round trip, no second shape to convert.
+- **QR login.** `login start` mints a code and publishes its
+  `identifier`; `login poll` checks that identifier once. The identifier
+  is the whole of the poll state, so the two verbs run as separate
+  processes and the caller polls on its own schedule. Poll until `done`
+  (store the credential) or `expired` (mint a new code). NetEase has no
+  distinct "user refused" code — a refusal simply lets the code expire —
+  so the `refused` state qq-cli can publish never appears here.
+- **Renewal.** `refresh` extends the exported session in place; upstream
+  answers 301 for a session past renewal, reported as
+  `credential_expired` so a caller replaces it instead of retrying.
 - **No unlocking.** `SkipUNM` is pinned true, so paid or region-locked
   tracks answer exit 4 rather than being routed around. The
   UnblockNeteaseMusic package arrives as a transitive dependency of the

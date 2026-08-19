@@ -72,3 +72,48 @@ func applyCookieEnv() error {
 	util.SetGlobalCookieJar(jar)
 	return nil
 }
+
+// renderCookieHeader serialises a jar's cookies back into the Cookie-
+// header string MUSICFOX_COOKIE carries.
+//
+// The exact inverse of parseCookieHeader: what a QR login publishes is
+// what this same binary accepts back, so the credential makes one round
+// trip through one format rather than sprouting a second one.
+func renderCookieHeader(cookies []*http.Cookie) string {
+	pairs := make([]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		pairs = append(pairs, cookie.Name+"="+cookie.Value)
+	}
+	return strings.Join(pairs, "; ")
+}
+
+// sessionCookieHeader reads the live session out of the global jar.
+//
+// Called after an authorised QR poll or a token refresh, both of which
+// land their Set-Cookie headers in that jar; an empty result means the
+// caller reached here without a session, which is a bug in the flow
+// rather than a state to publish.
+func sessionCookieHeader() (string, error) {
+	base, err := url.Parse("https://music.163.com")
+	if err != nil {
+		return "", fmt.Errorf("cannot parse netease base url: %w", err)
+	}
+	jar := util.GetGlobalCookieJar()
+	if jar == nil {
+		return "", fmt.Errorf("no cookie jar after authorisation")
+	}
+	header := renderCookieHeader(jar.Cookies(base))
+	if header == "" {
+		return "", fmt.Errorf("authorisation left no session cookies in the jar")
+	}
+	return header, nil
+}
+
+// cookieEnvIsSet reports whether a session was exported at all.
+//
+// The refresh verb needs the distinction parseCookieHeader does not
+// make: "nothing exported" is a caller mistake worth naming, while an
+// exported-but-rejected session is upstream's verdict.
+func cookieEnvIsSet() bool {
+	return strings.TrimSpace(os.Getenv(cookieEnvVar)) != ""
+}
