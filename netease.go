@@ -16,7 +16,7 @@ import (
 
 // SchemaVersion is the contract version the AutoSkill runner unwraps.
 // Bump when a published field changes meaning or disappears.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Track is one search result row.
 type Track struct {
@@ -29,10 +29,17 @@ type Track struct {
 }
 
 // PlayableURL is one resolved stream.
+//
+// Both halves of the quality answer ride the wire: ``Quality`` is the
+// TIER that answered (the word the panel offers), ``Bitrate`` is what
+// actually came back in kbps. Publishing only the tier would hide a
+// 320k stream answered under a lossless request; publishing only the
+// bitrate would hand the panel a number it cannot offer as a choice.
 type PlayableURL struct {
 	ID      string `json:"id"`
 	URL     string `json:"url"`
 	Quality string `json:"quality"`
+	Bitrate int64  `json:"bitrate"` // kbps, 0 when upstream does not say
 }
 
 // Playlist is one shelf entry. Field for field what qq-cli publishes,
@@ -232,12 +239,44 @@ func mapAccountResponse(body []byte) (Session, error) {
 	}, nil
 }
 
-// qualityLabel renders an upstream bitrate as the label the panel shows.
-func qualityLabel(br int64) string {
-	if br <= 0 {
-		return "unknown"
+// qualityTiers is the shared vocabulary, best first. A caller asks for
+// a TIER, never a bitrate: qq-cli's upstream exposes file types with no
+// bitrate knob at all, so bps could never have been the shared word.
+// One list, two resolvers, ordered so it doubles as the fallback ladder.
+var qualityTiers = []string{"lossless", "high", "standard"}
+
+// tierBitrate maps a tier to what NetEase's bitrate parameter wants.
+// Above-lossless values are pointless here: upstream caps at what the
+// account may play and answers the best it can below the ask.
+func tierBitrate(tier string) int64 {
+	switch tier {
+	case "lossless":
+		return 999000
+	case "high":
+		return 320000
+	case "standard":
+		return 128000
 	}
-	return fmt.Sprintf("%dk", br/1000)
+	return 0
+}
+
+// ladderFrom returns the tiers to probe for a requested tier, best
+// first, starting AT the request.
+//
+// Starting at the request rather than the top is the point: a caller
+// that picked the cheap tier gets the cheap tier, and only the fallback
+// direction (down) is automatic. An unknown tier yields no ladder — the
+// verb reports it rather than silently substituting a default.
+func ladderFrom(requested string) []string {
+	if requested == "" {
+		return qualityTiers
+	}
+	for i, tier := range qualityTiers {
+		if tier == requested {
+			return qualityTiers[i:]
+		}
+	}
+	return nil
 }
 
 // mapUrlResponse decodes a player-url body into one playable stream.
@@ -245,7 +284,7 @@ func qualityLabel(br int64) string {
 // Upstream answers 200 with a null url for a paid or region-locked
 // track. That is a refusal, not a result: publishing an empty url would
 // hand the player nothing and read as a bug on our side, so it raises.
-func mapUrlResponse(body []byte) (PlayableURL, error) {
+func mapUrlResponse(body []byte, tier string) (PlayableURL, error) {
 	var parsed struct {
 		Data []struct {
 			ID  int64   `json:"id"`
@@ -269,7 +308,8 @@ func mapUrlResponse(body []byte) (PlayableURL, error) {
 	return PlayableURL{
 		ID:      strconv.FormatInt(entry.ID, 10),
 		URL:     *entry.URL,
-		Quality: qualityLabel(entry.Br),
+		Quality: tier,
+		Bitrate: entry.Br / 1000,
 	}, nil
 }
 

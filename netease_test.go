@@ -114,7 +114,7 @@ func TestMapSearchResponseCorrupt(t *testing.T) {
 }
 
 func TestMapUrlResponse(t *testing.T) {
-	got, err := mapUrlResponse([]byte(urlFixture))
+	got, err := mapUrlResponse([]byte(urlFixture), "high")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -124,8 +124,8 @@ func TestMapUrlResponse(t *testing.T) {
 	if got.URL != "http://m701.music.126.net/x.mp3" {
 		t.Errorf("url: got %q", got.URL)
 	}
-	if got.Quality != "320k" {
-		t.Errorf("quality: want 320k, got %q", got.Quality)
+	if got.Quality != "high" {
+		t.Errorf("quality: want the tier that answered, got %q", got.Quality)
 	}
 }
 
@@ -133,7 +133,7 @@ func TestMapUrlResponseNullIsUpstreamRejection(t *testing.T) {
 	// A paid / region-locked track answers 200 with a null url. That is
 	// an upstream refusal, not a normal result: returning it as an empty
 	// string would hand mpv nothing to play and read as our bug.
-	_, err := mapUrlResponse([]byte(urlNullFixture))
+	_, err := mapUrlResponse([]byte(urlNullFixture), "high")
 	if err == nil {
 		t.Fatal("a null url must raise")
 	}
@@ -162,7 +162,7 @@ func TestMapLyricResponseMissingIsEmpty(t *testing.T) {
 
 func TestEnvelopeCarriesSchemaVersion(t *testing.T) {
 	// The contract the AutoSkill runner unwraps: every success payload
-	// is {"schema_version":1,"data":...}.
+	// is {"schema_version":N,"data":...}.
 	out, err := json.Marshal(newEnvelope([]Track{{ID: "1", Title: "t"}}))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -174,8 +174,10 @@ func TestEnvelopeCarriesSchemaVersion(t *testing.T) {
 	if err := json.Unmarshal(out, &probe); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if probe.SchemaVersion != 1 {
-		t.Errorf("schema_version: want 1, got %d", probe.SchemaVersion)
+	// Asserted against the constant, not a literal: the version is
+	// declared once and this pins that the envelope carries it.
+	if probe.SchemaVersion != SchemaVersion {
+		t.Errorf("schema_version: want %d, got %d", SchemaVersion, probe.SchemaVersion)
 	}
 	if len(probe.Data) == 0 {
 		t.Error("data must be present")
@@ -420,5 +422,75 @@ func TestMapDailySongsResponseEmpty(t *testing.T) {
 	}
 	if len(tracks) != 0 {
 		t.Errorf("want empty, got %d", len(tracks))
+	}
+}
+
+func TestQualityTierBitrates(t *testing.T) {
+	// The tier vocabulary is the CONTRACT both resolvers accept and
+	// answer in. A caller asks for a tier, never for a bitrate: qq's
+	// upstream has no bitrate knob at all, so bps could never be the
+	// shared word.
+	for _, tier := range qualityTiers {
+		if tierBitrate(tier) <= 0 {
+			t.Errorf("tier %q must map to a positive bitrate", tier)
+		}
+	}
+	if tierBitrate("lossless") <= tierBitrate("high") {
+		t.Error("lossless must request more than high")
+	}
+	if tierBitrate("high") <= tierBitrate("standard") {
+		t.Error("high must request more than standard")
+	}
+}
+
+func TestLadderFromStartsAtTheRequestedTier(t *testing.T) {
+	// Asking for standard must NOT probe lossless: a caller that picked
+	// the cheap tier gets the cheap tier, not a silent upgrade.
+	if got := ladderFrom("standard"); len(got) != 1 || got[0] != "standard" {
+		t.Errorf("standard ladder: got %v", got)
+	}
+	if got := ladderFrom("lossless"); len(got) != 3 || got[0] != "lossless" {
+		t.Errorf("lossless ladder: got %v", got)
+	}
+	// The default walks the whole ladder top-down.
+	if got := ladderFrom(""); len(got) != 3 || got[0] != "lossless" {
+		t.Errorf("default ladder: got %v", got)
+	}
+}
+
+func TestLadderFromUnknownTierIsEmpty(t *testing.T) {
+	// An unknown tier is caller error, reported by the verb — not
+	// silently coerced to a default the caller did not ask for.
+	if got := ladderFrom("ultra"); got != nil {
+		t.Errorf("unknown tier must yield no ladder, got %v", got)
+	}
+}
+
+func TestMapUrlResponsePublishesTierAndBitrate(t *testing.T) {
+	// Both halves ride the wire: the tier is what the panel offers, the
+	// bitrate is what actually came back. Publishing only the tier would
+	// hide a 320k stream answered under a lossless request.
+	got, err := mapUrlResponse([]byte(urlFixture), "high")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Quality != "high" {
+		t.Errorf("quality must name the tier that answered, got %q", got.Quality)
+	}
+	if got.Bitrate != 320 {
+		t.Errorf("bitrate must be published in kbps, got %d", got.Bitrate)
+	}
+}
+
+func TestMapUrlResponseUnknownBitrateIsZero(t *testing.T) {
+	// Upstream sometimes answers a playable url with br 0. That is
+	// "unknown", published as 0 rather than invented.
+	body := `{"data":[{"id":1,"url":"http://x/y.mp3","br":0}],"code":200}`
+	got, err := mapUrlResponse([]byte(body), "standard")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Bitrate != 0 {
+		t.Errorf("unknown bitrate must publish as 0, got %d", got.Bitrate)
 	}
 }

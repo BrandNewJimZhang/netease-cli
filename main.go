@@ -26,6 +26,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/go-musicfox/netease-music/service"
 )
@@ -40,7 +42,7 @@ const usage = `netease-cli — NetEase Cloud Music resolver
 
 usage:
   netease-cli search --keyword <text> [--limit N] [--format json]
-  netease-cli url    --id <track-id> [--quality <bitrate>] [--format json]
+  netease-cli url    --id <track-id> [--quality lossless|high|standard] [--format json]
   netease-cli lyric  --id <track-id> [--format json]
   netease-cli whoami [--format json]
 
@@ -188,7 +190,7 @@ func runSearch(args []string) int {
 func runURL(args []string) int {
 	fs := flag.NewFlagSet("url", flag.ContinueOnError)
 	id := fs.String("id", "", "track id (required)")
-	quality := fs.String("quality", "320000", "bitrate in bps")
+	quality := fs.String("quality", "", "tier: lossless / high / standard")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		failInput(err.Error())
@@ -203,19 +205,43 @@ func runURL(args []string) int {
 		return exitBadInput
 	}
 
-	// SkipUNM stays true: unlocking paid content is out of scope.
-	svc := &service.SongUrlService{ID: *id, Br: *quality, SkipUNM: true}
-	code, body := svc.SongUrl()
-	if code != 200 {
-		failUpstream(fmt.Sprintf("url rejected with code %v", code))
-		return exitUpstreamRefuse
+	ladder := ladderFrom(*quality)
+	if ladder == nil {
+		failInput(fmt.Sprintf(
+			"unknown --quality %q; want one of %s", *quality,
+			strings.Join(qualityTiers, " / ")))
+		return exitBadInput
 	}
-	resolved, err := mapUrlResponse(body)
-	if err != nil {
-		failUpstream(err.Error())
-		return exitUpstreamRefuse
+
+	// Walk down from the requested tier and answer the first rung that
+	// yields a stream. Upstream refuses a rung the account may not play
+	// (null url), which is a probe miss here — the refusal is reported
+	// only after the LAST rung, so the message names the whole attempt
+	// rather than one arbitrary rung of it.
+	var lastErr error
+	for _, tier := range ladder {
+		// SkipUNM stays true: unlocking paid content is out of scope.
+		svc := &service.SongUrlService{
+			ID:      *id,
+			Br:      strconv.FormatInt(tierBitrate(tier), 10),
+			SkipUNM: true,
+		}
+		code, body := svc.SongUrl()
+		if code != 200 {
+			failUpstream(fmt.Sprintf("url rejected with code %v", code))
+			return exitUpstreamRefuse
+		}
+		resolved, err := mapUrlResponse(body, tier)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return emit(resolved)
 	}
-	return emit(resolved)
+	failUpstream(fmt.Sprintf(
+		"no playable stream for track %s at %s or below: %v",
+		*id, ladder[0], lastErr))
+	return exitUpstreamRefuse
 }
 
 func runWhoami(args []string) int {

@@ -18,7 +18,7 @@ cp netease-cli /usr/local/bin/    # or anywhere on PATH
 
 ```bash
 netease-cli search --keyword "周杰伦 晴天" --limit 20
-netease-cli url    --id 186016 [--quality 320000]
+netease-cli url    --id 186016 [--quality lossless|high|standard]
 netease-cli lyric  --id 186016
 netease-cli whoami
 
@@ -36,13 +36,13 @@ netease-cli refresh
 Every success prints one envelope on stdout:
 
 ```json
-{"schema_version": 1, "data": ...}
+{"schema_version": 2, "data": ...}
 ```
 
 | Verb     | `data` shape |
 |----------|--------------|
 | `search` | `[{id, title, artist, album, cover, duration}]` — duration in milliseconds, multiple artists joined with ` / `, `cover` an album-art URL or `""` |
-| `url`    | `{id, url, quality}` |
+| `url`    | `{id, url, quality, bitrate}` — `quality` is the TIER that answered (`lossless` / `high` / `standard`), `bitrate` the measured kbps (0 when upstream does not say) |
 | `lyric`  | `{id, lrc}` — LRC document, `""` when the track has none |
 | `whoami` | `{logged_in, nickname, vip}` — who `MUSICFOX_COOKIE` authenticates as; anonymous and rejected cookies both answer `logged_in: false` |
 | `playlists` | `[{id, title, cover, count, description}]` — the account's own shelf |
@@ -99,6 +99,13 @@ Failures print one line on stderr and exit non-zero:
 - **Renewal.** `refresh` extends the exported session in place; upstream
   answers 301 for a session past renewal, reported as
   `credential_expired` so a caller replaces it instead of retrying.
+- **Quality tiers.** `--quality` names a TIER, never a bitrate: the
+  sibling resolver's upstream exposes file types with no bitrate knob,
+  so bps could never be the shared word. The request starts the ladder
+  and falls DOWN only — asking for `standard` never silently upgrades
+  you. The answer carries both the tier that landed and its measured
+  kbps, so a 320k stream answered under a lossless request is visible
+  rather than hidden behind the word.
 - **No unlocking.** `SkipUNM` is pinned true, so paid or region-locked
   tracks answer exit 4 rather than being routed around. The
   UnblockNeteaseMusic package arrives as a transitive dependency of the
