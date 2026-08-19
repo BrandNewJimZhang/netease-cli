@@ -14,6 +14,20 @@ go build -o netease-cli .
 cp netease-cli /usr/local/bin/    # or anywhere on PATH
 ```
 
+## Release artifact
+
+`scripts/build-artifact.sh [<goos>-<goarch>]` builds a stripped,
+CGO-free binary into `dist/` and prints the platform token and sha256 a
+marketplace entry needs:
+
+```bash
+scripts/build-artifact.sh darwin-arm64
+scripts/build-artifact.sh linux-amd64
+```
+
+The digest is printed with the binary because publishing one without
+the other fails on the user's machine, after the download.
+
 ## Verbs
 
 ```bash
