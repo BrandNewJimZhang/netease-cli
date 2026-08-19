@@ -316,3 +316,109 @@ func TestEncodeQRImageProducesAPNG(t *testing.T) {
 		t.Errorf("published image is not a PNG: % x", raw[:8])
 	}
 }
+
+// Playlist fixtures, trimmed from real responses (probed 2026-08-19).
+const userPlaylistFixture = `{"code":200,"playlist":[
+  {"id":123456,"name":"我喜欢的音乐","coverImgUrl":"https://p1.music.126.net/c.jpg",
+   "trackCount":238,"description":"自动收藏"},
+  {"id":789,"name":"睡前","coverImgUrl":"","trackCount":12,"description":null}
+]}`
+
+// AllTracks writes the fetched song details back into the detail body
+// under playlist.tracks — the same per-song shape cloudsearch nests
+// under result.songs, but at its own path.
+const allTracksFixture = `{"code":200,"playlist":{"name":"我喜欢的音乐","tracks":[
+  {"id":186016,"name":"晴天","dt":269000,
+   "ar":[{"name":"周杰伦"}],"al":{"name":"叶惠美","picUrl":"https://p1.music.126.net/a.jpg"}}
+]}}`
+
+const recommendSongsFixture = `{"code":200,"data":{"dailySongs":[
+  {"id":3339230677,"name":"稻香","dt":223000,
+   "ar":[{"name":"周杰伦"}],"al":{"name":"魔杰座","picUrl":"https://p1.music.126.net/b.jpg"}}
+]}}`
+
+func TestMapUserPlaylistResponse(t *testing.T) {
+	// The playlist row is the SECOND shared shape (after the track row):
+	// qq-cli publishes these exact field names, so one panel renders
+	// either resolver's shelf.
+	lists, err := mapUserPlaylistResponse([]byte(userPlaylistFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lists) != 2 {
+		t.Fatalf("want 2 playlists, got %d", len(lists))
+	}
+	want := Playlist{
+		ID:          "123456",
+		Title:       "我喜欢的音乐",
+		Cover:       "https://p1.music.126.net/c.jpg",
+		Count:       238,
+		Description: "自动收藏",
+	}
+	if lists[0] != want {
+		t.Errorf("first playlist: got %+v, want %+v", lists[0], want)
+	}
+	// A null description is an absent one, not the string "null".
+	if lists[1].Description != "" {
+		t.Errorf("null description must publish as empty, got %q", lists[1].Description)
+	}
+}
+
+func TestMapUserPlaylistResponseEmpty(t *testing.T) {
+	lists, err := mapUserPlaylistResponse([]byte(`{"code":200,"playlist":[]}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(lists) != 0 {
+		t.Errorf("empty shelf must publish as empty, got %d", len(lists))
+	}
+}
+
+func TestMapUserPlaylistResponseCorrupt(t *testing.T) {
+	if _, err := mapUserPlaylistResponse([]byte("not json")); err == nil {
+		t.Fatal("want an error for a corrupt body")
+	}
+}
+
+func TestMapPlaylistTracksResponse(t *testing.T) {
+	// Playlist tracks publish the SAME row as search, so the panel plays
+	// a shelf without a second mapper and queues it without a translation.
+	tracks, err := mapPlaylistTracksResponse([]byte(allTracksFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tracks) != 1 {
+		t.Fatalf("want 1 track, got %d", len(tracks))
+	}
+	if tracks[0].ID != "186016" || tracks[0].Title != "晴天" {
+		t.Errorf("track: got %+v", tracks[0])
+	}
+	if tracks[0].Artist != "周杰伦" || tracks[0].Duration != 269000 {
+		t.Errorf("track detail: got %+v", tracks[0])
+	}
+}
+
+func TestMapDailySongsResponse(t *testing.T) {
+	tracks, err := mapDailySongsResponse([]byte(recommendSongsFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tracks) != 1 || tracks[0].ID != "3339230677" {
+		t.Fatalf("daily songs: got %+v", tracks)
+	}
+	if tracks[0].Cover != "https://p1.music.126.net/b.jpg" {
+		t.Errorf("cover must ride the same field as search rows: %+v", tracks[0])
+	}
+}
+
+func TestMapDailySongsResponseEmpty(t *testing.T) {
+	// A day with no recommendations is a valid empty state (the account
+	// is new, or upstream has nothing yet) — not a fault.
+	tracks, err := mapDailySongsResponse([]byte(`{"code":200,"data":{"dailySongs":[]}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tracks) != 0 {
+		t.Errorf("want empty, got %d", len(tracks))
+	}
+}

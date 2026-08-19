@@ -22,6 +22,10 @@ netease-cli url    --id 186016 [--quality 320000]
 netease-cli lyric  --id 186016
 netease-cli whoami
 
+netease-cli playlists [--limit 50]
+netease-cli playlist  --id 24381616 [--limit 50]
+netease-cli daily
+
 netease-cli login start
 netease-cli login poll  --identifier <token from start>
 netease-cli refresh
@@ -41,6 +45,9 @@ Every success prints one envelope on stdout:
 | `url`    | `{id, url, quality}` |
 | `lyric`  | `{id, lrc}` — LRC document, `""` when the track has none |
 | `whoami` | `{logged_in, nickname, vip}` — who `MUSICFOX_COOKIE` authenticates as; anonymous and rejected cookies both answer `logged_in: false` |
+| `playlists` | `[{id, title, cover, count, description}]` — the account's own shelf |
+| `playlist` | `[{id, title, artist, album, cover, duration}]` — the SAME row `search` publishes, so a shelf is playable and queueable without a second shape |
+| `daily` | same track rows — today's recommendations |
 | `login start` | `{identifier, login_type, mimetype, image_base64}` — the QR to render and the token to poll it by |
 | `login poll` | `{state, credential}` — `state` is one of `pending` / `scanned` / `done` / `expired`; `credential` is `{cookie}`, non-null only on `done` |
 | `refresh` | `{cookie}` — the renewed session, same shape `login poll` publishes on `done` |
@@ -60,7 +67,7 @@ Failures print one line on stderr and exit non-zero:
 | `error_class`        | Exit | Meaning |
 |----------------------|------|---------|
 | `bad_input`          | 3    | malformed flag or unknown command |
-| `credential_missing` | 3    | `refresh` with `MUSICFOX_COOKIE` unset |
+| `credential_missing` | 3    | `refresh` / `playlists` / `daily` with no signed-in session |
 | `credential_expired` | 4    | upstream refused the renewal (code 301) — sign in again |
 | `upstream_rejected`  | 4    | non-200, unparseable body, no playable url |
 
@@ -79,6 +86,16 @@ Failures print one line on stderr and exit non-zero:
   (store the credential) or `expired` (mint a new code). NetEase has no
   distinct "user refused" code — a refusal simply lets the code expire —
   so the `refused` state qq-cli can publish never appears here.
+- **Account-scoped verbs.** `playlists` and `daily` describe one
+  account, so an anonymous session is refused by name rather than
+  answering an empty shelf — "you have nothing saved" and "we do not
+  know who you are" must not look the same. `playlist` takes a public
+  id and works signed out.
+- **Playlist paging.** `--limit` caps the published rows. Upstream
+  assembles the whole shelf in one call (there is no page to ask for),
+  so the cap is applied after the fetch — it bounds what the panel
+  renders, not what the network carries. It exists for argv parity with
+  qq-cli, whose upstream does page.
 - **Renewal.** `refresh` extends the exported session in place; upstream
   answers 301 for a session past renewal, reported as
   `credential_expired` so a caller replaces it instead of retrying.

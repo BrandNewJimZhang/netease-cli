@@ -35,6 +35,16 @@ type PlayableURL struct {
 	Quality string `json:"quality"`
 }
 
+// Playlist is one shelf entry. Field for field what qq-cli publishes,
+// so the panel renders either resolver's shelf without branching.
+type Playlist struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Cover       string `json:"cover"` // shelf art URL, "" when upstream has none
+	Count       int64  `json:"count"` // tracks in the playlist
+	Description string `json:"description"`
+}
+
 // Lyric is one track's LRC document.
 type Lyric struct {
 	ID  string `json:"id"`
@@ -68,33 +78,29 @@ func newErrorEnvelope(class, message string) errorEnvelope {
 	return errorEnvelope{ErrorClass: class, Message: message}
 }
 
-// mapSearchResponse decodes a cloudsearch body into published rows.
-//
-// An empty song list is a valid empty result; a body that does not
-// parse is corrupt and raises (fail-fast: empty and corrupt are
-// different states and must not collapse).
-func mapSearchResponse(body []byte) ([]Track, error) {
-	var parsed struct {
-		Result struct {
-			Songs []struct {
-				ID   int64  `json:"id"`
-				Name string `json:"name"`
-				Dt   int64  `json:"dt"`
-				Ar   []struct {
-					Name string `json:"name"`
-				} `json:"ar"`
-				Al struct {
-					Name   string `json:"name"`
-					PicURL string `json:"picUrl"`
-				} `json:"al"`
-			} `json:"songs"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("search response is not valid JSON: %w", err)
-	}
-	tracks := make([]Track, 0, len(parsed.Result.Songs))
-	for _, song := range parsed.Result.Songs {
+// upstreamSong is the per-song object NetEase repeats across every
+// endpoint that returns music: cloudsearch nests it under
+// result.songs, the playlist endpoint answers a bare array of it, and
+// the daily recommendation nests it under data.dailySongs. Declared
+// once so all three decode through the same field names — three copies
+// would be one drift away from three different published row shapes.
+type upstreamSong struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Dt   int64  `json:"dt"`
+	Ar   []struct {
+		Name string `json:"name"`
+	} `json:"ar"`
+	Al struct {
+		Name   string `json:"name"`
+		PicURL string `json:"picUrl"`
+	} `json:"al"`
+}
+
+// publishTracks turns decoded upstream songs into published rows.
+func publishTracks(songs []upstreamSong) []Track {
+	tracks := make([]Track, 0, len(songs))
+	for _, song := range songs {
 		names := make([]string, 0, len(song.Ar))
 		for _, artist := range song.Ar {
 			if artist.Name != "" {
@@ -110,7 +116,94 @@ func mapSearchResponse(body []byte) ([]Track, error) {
 			Duration: song.Dt,
 		})
 	}
-	return tracks, nil
+	return tracks
+}
+
+// mapSearchResponse decodes a cloudsearch body into published rows.
+//
+// An empty song list is a valid empty result; a body that does not
+// parse is corrupt and raises (fail-fast: empty and corrupt are
+// different states and must not collapse).
+func mapSearchResponse(body []byte) ([]Track, error) {
+	var parsed struct {
+		Result struct {
+			Songs []upstreamSong `json:"songs"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("search response is not valid JSON: %w", err)
+	}
+	return publishTracks(parsed.Result.Songs), nil
+}
+
+// mapPlaylistTracksResponse decodes one playlist's tracks.
+//
+// Upstream's detail body carries only track IDs; the library fetches the
+// song details separately and writes them BACK into the same body under
+// playlist.tracks, so that is where the rows are — not in a bare array,
+// and not under the `songs` key search uses.
+func mapPlaylistTracksResponse(body []byte) ([]Track, error) {
+	var parsed struct {
+		Playlist struct {
+			Tracks []upstreamSong `json:"tracks"`
+		} `json:"playlist"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("playlist track response is not valid JSON: %w", err)
+	}
+	return publishTracks(parsed.Playlist.Tracks), nil
+}
+
+// mapDailySongsResponse decodes the daily recommendation body.
+//
+// An empty day is a valid empty state — a new account, or upstream not
+// having computed today's set yet — so it publishes as no rows rather
+// than raising.
+func mapDailySongsResponse(body []byte) ([]Track, error) {
+	var parsed struct {
+		Data struct {
+			DailySongs []upstreamSong `json:"dailySongs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("daily songs response is not valid JSON: %w", err)
+	}
+	return publishTracks(parsed.Data.DailySongs), nil
+}
+
+// mapUserPlaylistResponse decodes the account's own shelf.
+//
+// The playlist row is the second shape both resolvers publish (after
+// the track row) — qq-cli emits these exact field names, so one panel
+// renders either shelf.
+func mapUserPlaylistResponse(body []byte) ([]Playlist, error) {
+	var parsed struct {
+		Playlist []struct {
+			ID          int64   `json:"id"`
+			Name        string  `json:"name"`
+			CoverImgURL string  `json:"coverImgUrl"`
+			TrackCount  int64   `json:"trackCount"`
+			Description *string `json:"description"`
+		} `json:"playlist"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("user playlist response is not valid JSON: %w", err)
+	}
+	lists := make([]Playlist, 0, len(parsed.Playlist))
+	for _, entry := range parsed.Playlist {
+		description := ""
+		if entry.Description != nil {
+			description = *entry.Description
+		}
+		lists = append(lists, Playlist{
+			ID:          strconv.FormatInt(entry.ID, 10),
+			Title:       entry.Name,
+			Cover:       entry.CoverImgURL,
+			Count:       entry.TrackCount,
+			Description: description,
+		})
+	}
+	return lists, nil
 }
 
 // mapAccountResponse decodes /api/nuser/account/get into a Session.

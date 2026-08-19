@@ -1,7 +1,8 @@
 // netease-cli — an agent-native resolver for NetEase Cloud Music.
 //
-// Read-only resolution (search / url / lyric / whoami) plus the login
-// lifecycle its session needs (login start / login poll / refresh) over
+// Read-only resolution (search / url / lyric / whoami) and the account's
+// own library (playlists / playlist / daily), plus the login lifecycle
+// the session needs (login start / login poll / refresh), over
 // the go-musicfox/netease-music library, each answering one JSON
 // envelope on stdout. Written for AutoSkill's music app, which drives it
 // as a host-existing binary off PATH — the same posture lark-cli has.
@@ -43,6 +44,10 @@ usage:
   netease-cli lyric  --id <track-id> [--format json]
   netease-cli whoami [--format json]
 
+  netease-cli playlists [--limit N] [--format json]
+  netease-cli playlist  --id <playlist-id> [--limit N] [--format json]
+  netease-cli daily [--format json]
+
   netease-cli login start [--format json]
   netease-cli login poll  --identifier <token> [--format json]
   netease-cli refresh [--format json]
@@ -69,6 +74,12 @@ func main() {
 		os.Exit(runLyric(os.Args[2:]))
 	case "whoami":
 		os.Exit(runWhoami(os.Args[2:]))
+	case "playlists":
+		os.Exit(runPlaylists(os.Args[2:]))
+	case "playlist":
+		os.Exit(runPlaylist(os.Args[2:]))
+	case "daily":
+		os.Exit(runDaily(os.Args[2:]))
 	case "refresh":
 		os.Exit(runRefresh(os.Args[2:]))
 	case "login":
