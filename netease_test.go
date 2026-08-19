@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"testing"
 )
 
@@ -492,5 +494,28 @@ func TestMapUrlResponseUnknownBitrateIsZero(t *testing.T) {
 	}
 	if got.Bitrate != 0 {
 		t.Errorf("unknown bitrate must publish as 0, got %d", got.Bitrate)
+	}
+}
+
+func TestUpstreamLoggerIsSilenced(t *testing.T) {
+	// The upstream library logs full request internals — url, method,
+	// encrypted params, response body, cookies — to the standard logger
+	// on ANY non-200. That writes to stderr, which this CLI's contract
+	// reserves for ONE error-envelope line: a caller parses stderr as
+	// JSON, so a log line prepended to it costs the error CLASS, and the
+	// dump leaks a live session's cookies into whatever collects logs.
+	silenceUpstreamLogger()
+
+	var probe bytes.Buffer
+	log.SetOutput(&probe)
+	defer log.SetOutput(os.Stderr)
+	// Re-silencing must survive a caller that reset the output, which is
+	// why the guard is the flags/prefix-independent io.Discard target
+	// rather than a one-shot at startup.
+	silenceUpstreamLogger()
+	log.Printf("this must not reach any writer a caller reads")
+
+	if probe.Len() != 0 {
+		t.Errorf("standard logger still writes: %q", probe.String())
 	}
 }

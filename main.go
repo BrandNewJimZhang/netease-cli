@@ -8,7 +8,7 @@
 // as a host-existing binary off PATH — the same posture lark-cli has.
 //
 // Contract (mirrored by the AutoSkill runner's tests):
-//   - stdout: {"schema_version":1,"data":<payload>}
+//   - stdout: {"schema_version":2,"data":<payload>}
 //   - stderr: one {"error_class","message"} line on failure
 //   - exit 0 ok / 3 bad input / 4 upstream refused
 //
@@ -25,6 +25,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -54,11 +56,26 @@ usage:
   netease-cli login poll  --identifier <token> [--format json]
   netease-cli refresh [--format json]
 
-Every verb prints {"schema_version":1,"data":...} on stdout. Failures
+Every verb prints {"schema_version":2,"data":...} on stdout. Failures
 print {"error_class","message"} on stderr and exit 3 (bad input) or
 4 (upstream refused).`
 
+// silenceUpstreamLogger points the standard logger at io.Discard.
+//
+// The upstream library dumps full request internals — url, method,
+// encrypted params, response body, cookies — through ``log.Printf`` on
+// ANY non-200. Two things break if that reaches stderr: this CLI's
+// contract reserves stderr for ONE error-envelope line, and a caller
+// that parses it as JSON loses the error CLASS to the prepended text;
+// and the dump puts a live session's cookies into whatever collects
+// logs. Neither is something a caller can opt out of, so the writer is
+// closed here rather than left to the operator.
+func silenceUpstreamLogger() {
+	log.SetOutput(io.Discard)
+}
+
 func main() {
+	silenceUpstreamLogger()
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(exitBadInput)
