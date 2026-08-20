@@ -24,14 +24,14 @@ type Track struct {
 	Title    string `json:"title"`
 	Artist   string `json:"artist"`
 	Album    string `json:"album"`
-	Cover    string `json:"cover"` // album art URL, "" when upstream has none
+	Cover    string `json:"cover"`    // album art URL, "" when upstream has none
 	Duration int64  `json:"duration"` // milliseconds, as upstream reports
 }
 
 // PlayableURL is one resolved stream.
 //
-// Both halves of the quality answer ride the wire: ``Quality`` is the
-// TIER that answered (the word the panel offers), ``Bitrate`` is what
+// Both halves of the quality answer ride the wire: “Quality“ is the
+// TIER that answered (the word the panel offers), “Bitrate“ is what
 // actually came back in kbps. Publishing only the tier would hide a
 // 320k stream answered under a lossless request; publishing only the
 // bitrate would hand the panel a number it cannot offer as a choice.
@@ -362,4 +362,22 @@ func mapQRStatusResponse(body []byte) (string, error) {
 		return "", fmt.Errorf("unknown qr status code %d", parsed.Code)
 	}
 	return state, nil
+}
+
+// rejected names an upstream refusal, carrying the detail the library
+// put in the BODY. Transport failures never reach a status line: the
+// library reports them as sentinel code 520 whose body is the
+// underlying error text (dns timeout, dial refused, tls reset), so a
+// message without the body turns an actionable failure into a bare
+// number. Real HTTP error bodies can be whole pages — the detail is
+// truncated to one readable line, rune-safely.
+func rejected(what string, code float64, body []byte) string {
+	detail := strings.TrimSpace(string(body))
+	if runes := []rune(detail); len(runes) > 300 {
+		detail = string(runes[:300]) + "…"
+	}
+	if detail == "" {
+		return fmt.Sprintf("%s rejected with code %v", what, code)
+	}
+	return fmt.Sprintf("%s rejected with code %v: %s", what, code, detail)
 }

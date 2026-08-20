@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // Fixtures are trimmed captures of real NetEase responses (probed
@@ -517,5 +519,39 @@ func TestUpstreamLoggerIsSilenced(t *testing.T) {
 
 	if probe.Len() != 0 {
 		t.Errorf("standard logger still writes: %q", probe.String())
+	}
+}
+
+func TestRejectedCarriesTheBodyDetail(t *testing.T) {
+	// The library reports transport failures as sentinel code 520 with
+	// the underlying error text in the BODY (dns timeout, dial refused).
+	// Dropping it turns an actionable failure into a bare number.
+	msg := rejected("search", 520, []byte("lookup music.163.com: i/o timeout"))
+	want := "search rejected with code 520: lookup music.163.com: i/o timeout"
+	if msg != want {
+		t.Errorf("want %q, got %q", want, msg)
+	}
+}
+
+func TestRejectedWithoutBodyStaysBare(t *testing.T) {
+	msg := rejected("search", 404, []byte("  \n"))
+	if msg != "search rejected with code 404" {
+		t.Errorf("got %q", msg)
+	}
+}
+
+func TestRejectedTruncatesOversizedBodies(t *testing.T) {
+	// A real HTTP error body can be a whole HTML page; the envelope
+	// message stays one readable line.
+	long := strings.Repeat("宽", 400)
+	msg := rejected("search", 502, []byte(long))
+	if utf8.RuneCountInString(msg) >= utf8.RuneCountInString("search rejected with code 502: ")+400 {
+		t.Errorf("body was not truncated: %d runes", utf8.RuneCountInString(msg))
+	}
+	if !strings.HasSuffix(msg, "…") {
+		t.Errorf("truncation must be visible, got tail %q", msg[len(msg)-12:])
+	}
+	if !utf8.ValidString(msg) {
+		t.Error("truncation split a rune")
 	}
 }

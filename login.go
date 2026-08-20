@@ -82,13 +82,13 @@ func runLoginStart(args []string) int {
 		return exitBadInput
 	}
 	qr := &service.LoginQRService{}
-	code, _, loginURL, err := qr.GetKey()
+	code, body, loginURL, err := qr.GetKey()
 	if err != nil {
 		failUpstream(fmt.Sprintf("cannot mint a login qr code: %v", err))
 		return exitUpstreamRefuse
 	}
 	if code != 200 || qr.UniKey == "" {
-		failUpstream(fmt.Sprintf("upstream refused to mint a login qr code (code %v)", code))
+		failUpstream(rejected("login qr mint", code, body))
 		return exitUpstreamRefuse
 	}
 	image, err := encodeQRImage(loginURL)

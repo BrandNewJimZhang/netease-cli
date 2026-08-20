@@ -63,7 +63,7 @@ print {"error_class","message"} on stderr and exit 3 (bad input) or
 // silenceUpstreamLogger points the standard logger at io.Discard.
 //
 // The upstream library dumps full request internals — url, method,
-// encrypted params, response body, cookies — through ``log.Printf`` on
+// encrypted params, response body, cookies — through “log.Printf“ on
 // ANY non-200. Two things break if that reaches stderr: this CLI's
 // contract reserves stderr for ONE error-envelope line, and a caller
 // that parses it as JSON loses the error CLASS to the prepended text;
@@ -193,7 +193,7 @@ func runSearch(args []string) int {
 	}
 	code, body := svc.Search()
 	if code != 200 {
-		failUpstream(fmt.Sprintf("search rejected with code %v", code))
+		failUpstream(rejected("search", code, body))
 		return exitUpstreamRefuse
 	}
 	tracks, err := mapSearchResponse(body)
@@ -245,7 +245,7 @@ func runURL(args []string) int {
 		}
 		code, body := svc.SongUrl()
 		if code != 200 {
-			failUpstream(fmt.Sprintf("url rejected with code %v", code))
+			failUpstream(rejected("url", code, body))
 			return exitUpstreamRefuse
 		}
 		resolved, err := mapUrlResponse(body, tier)
@@ -276,7 +276,7 @@ func runWhoami(args []string) int {
 	svc := &service.UserAccountService{}
 	code, body := svc.AccountInfo()
 	if code != 200 {
-		failUpstream(fmt.Sprintf("account rejected with code %v", code))
+		failUpstream(rejected("account", code, body))
 		return exitUpstreamRefuse
 	}
 	session, err := mapAccountResponse(body)
@@ -307,7 +307,7 @@ func runLyric(args []string) int {
 	svc := &service.LyricService{ID: *id}
 	code, body := svc.Lyric()
 	if code != 200 {
-		failUpstream(fmt.Sprintf("lyric rejected with code %v", code))
+		failUpstream(rejected("lyric", code, body))
 		return exitUpstreamRefuse
 	}
 	lrc, err := mapLyricResponse(body)

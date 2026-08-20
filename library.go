@@ -29,7 +29,7 @@ func currentUserID() (string, error) {
 	svc := &service.UserAccountService{}
 	code, body := svc.AccountInfo()
 	if code != 200 {
-		return "", fmt.Errorf("account rejected with code %v", code)
+		return "", fmt.Errorf("%s", rejected("account", code, body))
 	}
 	var parsed struct {
 		Profile *struct {
@@ -79,7 +79,7 @@ func runPlaylists(args []string) int {
 	svc := &service.UserPlaylistService{Uid: uid, Limit: strconv.Itoa(*limit)}
 	code, body := svc.UserPlaylist()
 	if code != 200 {
-		failUpstream(fmt.Sprintf("playlist shelf rejected with code %v", code))
+		failUpstream(rejected("playlist shelf", code, body))
 		return exitUpstreamRefuse
 	}
 	lists, err := mapUserPlaylistResponse(body)
@@ -119,7 +119,7 @@ func runPlaylist(args []string) int {
 	svc := &service.PlaylistTrackAllService{Id: *id}
 	code, body := svc.AllTracks()
 	if code != 200 {
-		failUpstream(fmt.Sprintf("playlist %s rejected with code %v", *id, code))
+		failUpstream(rejected(fmt.Sprintf("playlist %s", *id), code, body))
 		return exitUpstreamRefuse
 	}
 	tracks, err := mapPlaylistTracksResponse(body)
@@ -152,7 +152,7 @@ func runDaily(args []string) int {
 	svc := &service.RecommendSongsService{}
 	code, body := svc.RecommendSongs()
 	if code != 200 {
-		failUpstream(fmt.Sprintf("daily recommendations rejected with code %v", code))
+		failUpstream(rejected("daily recommendations", code, body))
 		return exitUpstreamRefuse
 	}
 	tracks, err := mapDailySongsResponse(body)
