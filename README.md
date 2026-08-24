@@ -1,5 +1,11 @@
 # netease-cli
 
+**English** | [简体中文](README.zh-CN.md)
+
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Schema](https://img.shields.io/badge/schema__version-2-blue)
+
 An agent-native resolver for NetEase Cloud Music: read-only verbs that
 answer JSON, plus the login lifecycle their session needs. Built for
 AutoSkill's music app but usable by any caller that speaks shell.
