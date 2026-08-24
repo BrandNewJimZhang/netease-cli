@@ -1,4 +1,4 @@
-module github.com/jimzhang/netease-cli
+module github.com/BrandNewJimZhang/netease-cli
 
 go 1.26.6
 
