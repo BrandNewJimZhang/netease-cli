@@ -2,8 +2,7 @@
 
 An agent-native resolver for NetEase Cloud Music: read-only verbs that
 answer JSON, plus the login lifecycle their session needs. Built for
-[AutoSkill](https://github.com/)'s music app but usable by any caller
-that speaks shell.
+AutoSkill's music app but usable by any caller that speaks shell.
 
 Wraps [go-musicfox/netease-music](https://github.com/go-musicfox/netease-music).
 
@@ -129,3 +128,19 @@ Failures print one line on stderr and exit non-zero:
   or break at any time.
 - **Line-level lyrics only.** The `yrc` word-level (karaoke) field is
   not published.
+
+## Legal notice
+
+An unofficial project, not affiliated with or endorsed by NetEase Cloud
+Music. Personal, non-commercial use only. It authenticates as you and
+reads the same endpoints the official client serves your own account —
+within that account's entitlements, never around them (see *No
+unlocking* above). No audio is bundled, cached or redistributed; the CLI
+publishes URLs the service minted for your session. You are responsible
+for complying with the service's terms in your jurisdiction. Rights
+holders may open an issue with takedown concerns; the maintainer will
+comply promptly.
+
+## License
+
+[MIT](LICENSE)
