@@ -15,6 +15,12 @@
 ## 安装
 
 ```bash
+go install github.com/BrandNewJimZhang/netease-cli@latest
+```
+
+或从源码检出构建：
+
+```bash
 go build -o netease-cli .
 cp netease-cli /usr/local/bin/    # or anywhere on PATH
 ```

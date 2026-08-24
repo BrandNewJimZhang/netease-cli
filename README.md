@@ -15,6 +15,12 @@ Wraps [go-musicfox/netease-music](https://github.com/go-musicfox/netease-music).
 ## Install
 
 ```bash
+go install github.com/BrandNewJimZhang/netease-cli@latest
+```
+
+Or from a checkout:
+
+```bash
 go build -o netease-cli .
 cp netease-cli /usr/local/bin/    # or anywhere on PATH
 ```
