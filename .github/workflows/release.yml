@@ -2,6 +2,13 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to (re)publish, e.g. v0.1.0
+        required: true
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -22,11 +29,32 @@ jobs:
         with:
           go-version-file: go.mod
       - run: ./scripts/build-artifact.sh ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - name: Resolve tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "ref=${{ inputs.tag }}" >> "$GITHUB_ENV"
+          else
+            echo "ref=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          fi
       - name: Create release
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes || true
+        run: gh release create "$ref" --verify-tag --generate-notes || true
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Upload assets
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$ref" dist/* --clobber
         env:
           GH_TOKEN: ${{ github.token }}
