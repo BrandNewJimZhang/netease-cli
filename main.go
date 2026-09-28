@@ -27,11 +27,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/go-musicfox/netease-music/service"
+	"github.com/go-musicfox/netease-music/util"
 )
 
 const (
@@ -304,16 +306,37 @@ func runLyric(args []string) int {
 		return exitBadInput
 	}
 
-	svc := &service.LyricService{ID: *id}
-	code, body := svc.Lyric()
+	code, body := requestLyric(*id)
 	if code != 200 {
 		failUpstream(rejected("lyric", code, body))
 		return exitUpstreamRefuse
 	}
-	lrc, err := mapLyricResponse(body)
+	lrc, words, err := mapLyricResponse(body)
 	if err != nil {
 		failUpstream(err.Error())
 		return exitUpstreamRefuse
 	}
-	return emit(Lyric{ID: *id, LRC: lrc})
+	return emit(Lyric{ID: *id, LRC: lrc, Words: words})
+}
+
+// requestLyric asks the v1 lyric endpoint for one track: the LRC and the
+// word-timed yrc in one round trip. Spelled here rather than through the
+// library's LyricService because that service is fixed to the older
+// /api/song/lyric, which never answers yrc, and takes no parameters to
+// ask for it. The field set is the desktop client's; "0" on each asks
+// for that document from its first version.
+func requestLyric(id string) (float64, []byte) {
+	options := &util.Options{
+		Crypto:  "linuxapi",
+		Cookies: []*http.Cookie{{Name: "os", Value: "pc"}},
+	}
+	data := map[string]string{
+		"id": id, "cp": "false",
+		"lv": "0", "tv": "0", "rv": "0", "kv": "0",
+		"yv": "0", "ytv": "0", "yrv": "0",
+	}
+	code, body, _ := util.CreateRequest(
+		"POST", "https://music.163.com/api/song/lyric/v1", data, options,
+	)
+	return code, body
 }

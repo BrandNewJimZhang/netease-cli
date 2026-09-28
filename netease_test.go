@@ -36,6 +36,14 @@ const accountAnonymousFixture = `{"code":200,"account":null,"profile":null}`
 
 const lyricFixture = `{"lrc":{"lyric":"[00:01.00]故事的小黄花\n[00:12.50]从出生那年"},"code":200}`
 
+// A /api/song/lyric/v1 capture (probed 2026-09-28, track 1901371647),
+// trimmed to a credit line and two sung lines. The credit lines are JSON
+// objects; the sung lines carry a line cue and one cue per word, in ms.
+const wordLyricFixture = `{"lrc":{"lyric":"[00:22.31]都是勇敢的"},` +
+	`"yrc":{"lyric":"{\"t\":0,\"c\":[{\"tx\":\"作词: \"},{\"tx\":\"唐恬\"}]}\n` +
+	`[22310,4300](22310,2880,0)都 (25190,310,0)是(25500,290,0)勇(25790,230,0)敢(26020,590,0)的\n` +
+	`[26610,1200](26610,600,0)你(27210,600,0)好\n"},"code":200}`
+
 func TestMapSearchResponse(t *testing.T) {
 	tracks, err := mapSearchResponse([]byte(searchFixture))
 	if err != nil {
@@ -144,7 +152,7 @@ func TestMapUrlResponseNullIsUpstreamRejection(t *testing.T) {
 }
 
 func TestMapLyricResponse(t *testing.T) {
-	lrc, err := mapLyricResponse([]byte(lyricFixture))
+	lrc, _, err := mapLyricResponse([]byte(lyricFixture))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -155,12 +163,66 @@ func TestMapLyricResponse(t *testing.T) {
 
 func TestMapLyricResponseMissingIsEmpty(t *testing.T) {
 	// A track with no lyric is the common case, not a failure.
-	lrc, err := mapLyricResponse([]byte(`{"code":200}`))
+	lrc, words, err := mapLyricResponse([]byte(`{"code":200}`))
 	if err != nil {
 		t.Fatalf("missing lyric must not raise: %v", err)
 	}
 	if lrc != "" {
 		t.Errorf("want empty lrc, got %q", lrc)
+	}
+	// Empty, not nil: the wire says "no word timing" as [], never null.
+	if words == nil || len(words) != 0 {
+		t.Errorf("want an empty word sheet, got %#v", words)
+	}
+}
+
+func TestMapLyricResponseCarriesTheWordSheet(t *testing.T) {
+	lrc, words, err := mapLyricResponse([]byte(wordLyricFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lrc != "[00:22.31]都是勇敢的" {
+		t.Errorf("lrc: got %q", lrc)
+	}
+	// The credit line is not a sung line: it has no cue to light.
+	if len(words) != 2 {
+		t.Fatalf("want 2 sung lines, got %d: %#v", len(words), words)
+	}
+	first := words[0]
+	if first.Start != 22310 || first.Duration != 4300 || first.Text != "都 是勇敢的" {
+		t.Errorf("line: got %+v", first)
+	}
+	if len(first.Words) != 5 {
+		t.Fatalf("want 5 words, got %d", len(first.Words))
+	}
+	// A word's text keeps its trailing space: that space is sung silence
+	// between words, and the line reads wrong without it.
+	if w := first.Words[0]; w.Start != 22310 || w.Duration != 2880 || w.Text != "都 " {
+		t.Errorf("first word: got %+v", w)
+	}
+	if w := first.Words[4]; w.Start != 26020 || w.Duration != 590 || w.Text != "的" {
+		t.Errorf("last word: got %+v", w)
+	}
+}
+
+func TestParseYrcRefusesAMalformedLine(t *testing.T) {
+	// A cue line that does not parse is an upstream shape change, and a
+	// sheet with a line silently missing would light the wrong words.
+	if _, err := parseYrc("[22310,4300]都是(25190,310,0)"); err == nil {
+		t.Fatal("a word before its cue must be refused")
+	}
+	if _, err := parseYrc("[oops](1,2,0)x"); err == nil {
+		t.Fatal("a malformed line cue must be refused")
+	}
+}
+
+func TestLyricWireCarriesWordsAsAList(t *testing.T) {
+	out, err := json.Marshal(Lyric{ID: "1", LRC: "", Words: []WordLine{}})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != `{"id":"1","lrc":"","words":[]}` {
+		t.Errorf("wire: got %s", out)
 	}
 }
 

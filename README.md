@@ -68,7 +68,7 @@ Every success prints one envelope on stdout:
 |----------|--------------|
 | `search` | `[{id, title, artist, album, cover, duration}]` — duration in milliseconds, multiple artists joined with ` / `, `cover` an album-art URL or `""` |
 | `url`    | `{id, url, quality, bitrate}` — `quality` is the TIER that answered (`lossless` / `high` / `standard`), `bitrate` the measured kbps (0 when upstream does not say) |
-| `lyric`  | `{id, lrc}` — LRC document, `""` when the track has none |
+| `lyric`  | `{id, lrc, words}` — LRC document (`""` when the track has none) and the word-timed sheet: `[{start, duration, text, words: [{start, duration, text}]}]`, ms from track start, `[]` when upstream has no word timing |
 | `whoami` | `{logged_in, nickname, vip}` — who `MUSICFOX_COOKIE` authenticates as; anonymous and rejected cookies both answer `logged_in: false` |
 | `playlists` | `[{id, title, cover, count, description}]` — the account's own shelf |
 | `playlist` | `[{id, title, artist, album, cover, duration}]` — the SAME row `search` publishes, so a shelf is playable and queueable without a second shape |
@@ -138,8 +138,10 @@ Failures print one line on stderr and exit non-zero:
 - **Reverse-engineered.** NetEase publishes no personal-use API. This
   reads the same endpoints the desktop client uses; upstream can change
   or break at any time.
-- **Line-level lyrics only.** The `yrc` word-level (karaoke) field is
-  not published.
+- **Word timing where upstream has it.** `words` is NetEase's `yrc`,
+  which most tracks from before ~2021 do not carry; for those it is `[]`
+  and `lrc` is the fallback. Translation and romanisation are not
+  published.
 
 ## Legal notice
 

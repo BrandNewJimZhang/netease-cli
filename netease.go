@@ -10,6 +10,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -52,10 +53,32 @@ type Playlist struct {
 	Description string `json:"description"`
 }
 
-// Lyric is one track's LRC document.
+// Lyric is one track's lyric: the LRC document, and the word-timed sheet
+// when upstream has one. Field for field what qq-cli publishes — one
+// shape, two resolvers, so the panel lights words without knowing which
+// service answered. Words is [] (never null) for a track with no word
+// timing, and the LRC is what a player falls back to then.
 type Lyric struct {
-	ID  string `json:"id"`
-	LRC string `json:"lrc"`
+	ID    string     `json:"id"`
+	LRC   string     `json:"lrc"`
+	Words []WordLine `json:"words"`
+}
+
+// WordLine is one sung line of the word-timed sheet. Times are ms from
+// the start of the track.
+type WordLine struct {
+	Start    int64  `json:"start"`
+	Duration int64  `json:"duration"`
+	Text     string `json:"text"`
+	Words    []Word `json:"words"`
+}
+
+// Word is one timed word (for CJK, one character) of a line. Its text
+// keeps any trailing space: that space is the silence between two words.
+type Word struct {
+	Start    int64  `json:"start"`
+	Duration int64  `json:"duration"`
+	Text     string `json:"text"`
 }
 
 // Session is the whoami verdict: who the exported cookie authenticates
@@ -313,20 +336,89 @@ func mapUrlResponse(body []byte, tier string) (PlayableURL, error) {
 	}, nil
 }
 
-// mapLyricResponse decodes a lyric body into its LRC document.
+// mapLyricResponse decodes a /api/song/lyric/v1 body into its LRC
+// document and its word-timed sheet (NetEase's “yrc“).
 //
-// A track with no lyric returns "" rather than raising: an instrumental
-// is a normal state, and the panel renders an empty lyric column.
-func mapLyricResponse(body []byte) (string, error) {
+// A track with no lyric returns "" and no words rather than raising: an
+// instrumental is a normal state, and so is a track with line timing
+// only — most of the catalogue before ~2021 has no yrc at all.
+func mapLyricResponse(body []byte) (string, []WordLine, error) {
 	var parsed struct {
 		Lrc struct {
 			Lyric string `json:"lyric"`
 		} `json:"lrc"`
+		Yrc struct {
+			Lyric string `json:"lyric"`
+		} `json:"yrc"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", fmt.Errorf("lyric response is not valid JSON: %w", err)
+		return "", nil, fmt.Errorf("lyric response is not valid JSON: %w", err)
 	}
-	return parsed.Lrc.Lyric, nil
+	words, err := parseYrc(parsed.Yrc.Lyric)
+	if err != nil {
+		return "", nil, err
+	}
+	return parsed.Lrc.Lyric, words, nil
+}
+
+var (
+	// [line start ms, line duration ms] then the words.
+	yrcLineRE = regexp.MustCompile(`^\[(\d+),(\d+)\](.*)$`)
+	// (word start ms, word duration ms, 0) — the third field is always 0
+	// in every capture and carries nothing the sheet needs.
+	yrcWordRE = regexp.MustCompile(`\((\d+),(\d+),-?\d+\)`)
+)
+
+// parseYrc turns NetEase's yrc text into sung lines of timed words.
+//
+// Each sung line is “[start,duration]“ followed by “(start,duration,0)“
+// cues, each cue preceding its word. The credit lines above them
+// (lyricist, composer...) are JSON objects with no word timing and are
+// skipped, as are blank lines. A line that starts like a cue but does not
+// parse is an error, not a skip: it means upstream changed shape, and a
+// sheet silently missing a line lights the wrong words.
+func parseYrc(text string) ([]WordLine, error) {
+	lines := []WordLine{}
+	for index, raw := range strings.Split(text, "\n") {
+		raw = strings.TrimRight(raw, "\r")
+		if strings.TrimSpace(raw) == "" || strings.HasPrefix(raw, "{") {
+			continue
+		}
+		head := yrcLineRE.FindStringSubmatch(raw)
+		if head == nil {
+			return nil, fmt.Errorf("yrc line %d is malformed: %q", index+1, raw)
+		}
+		rest := head[3]
+		cues := yrcWordRE.FindAllStringSubmatchIndex(rest, -1)
+		if len(cues) == 0 || cues[0][0] != 0 {
+			return nil, fmt.Errorf("yrc line %d has text before its first word cue: %q", index+1, raw)
+		}
+		line := WordLine{Start: atoi(head[1]), Duration: atoi(head[2]), Words: []Word{}}
+		for i, cue := range cues {
+			end := len(rest)
+			if i+1 < len(cues) {
+				end = cues[i+1][0]
+			}
+			word := Word{
+				Start:    atoi(rest[cue[2]:cue[3]]),
+				Duration: atoi(rest[cue[4]:cue[5]]),
+				Text:     rest[cue[1]:end],
+			}
+			line.Words = append(line.Words, word)
+			line.Text += word.Text
+		}
+		if strings.TrimSpace(line.Text) == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
+// atoi reads a digit run the regexps above already matched.
+func atoi(digits string) int64 {
+	n, _ := strconv.ParseInt(digits, 10, 64)
+	return n
 }
 
 // qrStates maps NetEase's qrcode/client/login status code to the state

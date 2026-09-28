@@ -67,7 +67,7 @@ netease-cli refresh
 |----------|--------------|
 | `search` | `[{id, title, artist, album, cover, duration}]` —— `duration` 为毫秒，多位歌手以 ` / ` 连接，`cover` 为专辑封面 URL 或 `""` |
 | `url`    | `{id, url, quality, bitrate}` —— `quality` 是实际应答的档位（`lossless` / `high` / `standard`），`bitrate` 是实测 kbps（上游未说明时为 0） |
-| `lyric`  | `{id, lrc}` —— LRC 文档，曲目无歌词时为 `""` |
+| `lyric`  | `{id, lrc, words}` —— LRC 文档（曲目无歌词时为 `""`）与逐字歌词：`[{start, duration, text, words: [{start, duration, text}]}]`，单位为距曲目开头的毫秒；上游无逐字时间时为 `[]` |
 | `whoami` | `{logged_in, nickname, vip}` —— `MUSICFOX_COOKIE` 认证出的身份；匿名与被拒 cookie 都应答 `logged_in: false` |
 | `playlists` | `[{id, title, cover, count, description}]` —— 该账号自己的歌单书架 |
 | `playlist` | `[{id, title, artist, album, cover, duration}]` —— 与 `search` 发布的同一行形状，书架无需第二种形状即可播放、入队 |
@@ -128,7 +128,7 @@ netease-cli refresh
   调用。
 - **逆向实现。** 网易不发布面向个人使用的 API。本工具读取桌面客户端
   使用的相同端点；上游随时可能变更或失效。
-- **仅行级歌词。** 不发布 `yrc` 字级（卡拉OK）字段。
+- **上游有逐字时间才有逐字歌词。** `words` 即网易云的 `yrc`，约 2021 年以前的曲目大多没有，此时为 `[]`，以 `lrc` 兜底。不发布翻译与罗马音。
 
 ## 法律声明
 
