@@ -67,7 +67,7 @@ netease-cli refresh
 |----------|--------------|
 | `search` | `[{id, title, artist, album, cover, duration}]` —— `duration` 为毫秒，多位歌手以 ` / ` 连接，`cover` 为专辑封面 URL 或 `""` |
 | `url`    | `{id, url, quality, bitrate}` —— `quality` 是实际应答的档位（`lossless` / `high` / `standard`），`bitrate` 是实测 kbps（上游未说明时为 0） |
-| `lyric`  | `{id, lrc, words}` —— LRC 文档（曲目无歌词时为 `""`）与逐字歌词：`[{start, duration, text, words: [{start, duration, text}]}]`，单位为距曲目开头的毫秒；上游无逐字时间时为 `[]` |
+| `lyric`  | `{id, lrc, words}` —— LRC 文档（曲目无歌词时为 `""`）与逐字歌词：`[{start, duration, text, words: [{start, duration, text}]}]`，单位为距曲目开头的毫秒；上游无逐字时间时为 `[]`。可选的 `line_notes` / `word_notes`：`{translation?, romanization?}` LRC 文档，分别按 `lrc` 与 `words` 的时间轴打点，曲目没有时省略 |
 | `whoami` | `{logged_in, nickname, vip}` —— `MUSICFOX_COOKIE` 认证出的身份；匿名与被拒 cookie 都应答 `logged_in: false` |
 | `playlists` | `[{id, title, cover, count, description}]` —— 该账号自己的歌单书架 |
 | `playlist` | `[{id, title, artist, album, cover, duration}]` —— 与 `search` 发布的同一行形状，书架无需第二种形状即可播放、入队 |

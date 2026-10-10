@@ -58,10 +58,33 @@ type Playlist struct {
 // shape, two resolvers, so the panel lights words without knowing which
 // service answered. Words is [] (never null) for a track with no word
 // timing, and the LRC is what a player falls back to then.
+//
+// LineNotes and WordNotes forward the note documents untouched: each is
+// LRC, LineNotes cued to LRC and WordNotes cued to the Words lines.
+// Parsing and aligning them is the runner's, which reads one rule for
+// both resolvers; a note the track lacks is omitted, never "".
 type Lyric struct {
-	ID    string     `json:"id"`
-	LRC   string     `json:"lrc"`
-	Words []WordLine `json:"words"`
+	ID        string      `json:"id"`
+	LRC       string      `json:"lrc"`
+	Words     []WordLine  `json:"words"`
+	LineNotes *LyricNotes `json:"line_notes,omitempty"`
+	WordNotes *LyricNotes `json:"word_notes,omitempty"`
+}
+
+// LyricNotes is the LRC documents that annotate one timeline: the
+// translation and the romaji (the runner derives furigana from it).
+type LyricNotes struct {
+	Translation  string `json:"translation,omitempty"`
+	Romanization string `json:"romanization,omitempty"`
+}
+
+// lyricNotes is nil when the track has neither document, so the field
+// is absent rather than an empty object.
+func lyricNotes(translation, romanization string) *LyricNotes {
+	if translation == "" && romanization == "" {
+		return nil
+	}
+	return &LyricNotes{Translation: translation, Romanization: romanization}
 }
 
 // WordLine is one sung line of the word-timed sheet. Times are ms from
@@ -336,29 +359,40 @@ func mapUrlResponse(body []byte, tier string) (PlayableURL, error) {
 	}, nil
 }
 
+// lyricDocument is one of the v1 body's documents: {"lyric": "..."}.
+type lyricDocument struct {
+	Lyric string `json:"lyric"`
+}
+
 // mapLyricResponse decodes a /api/song/lyric/v1 body into its LRC
-// document and its word-timed sheet (NetEase's “yrc“).
+// document, its word-timed sheet (NetEase's “yrc“), and the note
+// documents of each timeline. The ID is the caller's to fill.
 //
 // A track with no lyric returns "" and no words rather than raising: an
 // instrumental is a normal state, and so is a track with line timing
 // only — most of the catalogue before ~2021 has no yrc at all.
-func mapLyricResponse(body []byte) (string, []WordLine, error) {
+func mapLyricResponse(body []byte) (Lyric, error) {
 	var parsed struct {
-		Lrc struct {
-			Lyric string `json:"lyric"`
-		} `json:"lrc"`
-		Yrc struct {
-			Lyric string `json:"lyric"`
-		} `json:"yrc"`
+		Lrc      lyricDocument `json:"lrc"`
+		Yrc      lyricDocument `json:"yrc"`
+		Tlyric   lyricDocument `json:"tlyric"`
+		Romalrc  lyricDocument `json:"romalrc"`
+		Ytlrc    lyricDocument `json:"ytlrc"`
+		Yromalrc lyricDocument `json:"yromalrc"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", nil, fmt.Errorf("lyric response is not valid JSON: %w", err)
+		return Lyric{}, fmt.Errorf("lyric response is not valid JSON: %w", err)
 	}
 	words, err := parseYrc(parsed.Yrc.Lyric)
 	if err != nil {
-		return "", nil, err
+		return Lyric{}, err
 	}
-	return parsed.Lrc.Lyric, words, nil
+	return Lyric{
+		LRC:       parsed.Lrc.Lyric,
+		Words:     words,
+		LineNotes: lyricNotes(parsed.Tlyric.Lyric, parsed.Romalrc.Lyric),
+		WordNotes: lyricNotes(parsed.Ytlrc.Lyric, parsed.Yromalrc.Lyric),
+	}, nil
 }
 
 var (

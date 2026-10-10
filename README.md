@@ -68,7 +68,7 @@ Every success prints one envelope on stdout:
 |----------|--------------|
 | `search` | `[{id, title, artist, album, cover, duration}]` — duration in milliseconds, multiple artists joined with ` / `, `cover` an album-art URL or `""` |
 | `url`    | `{id, url, quality, bitrate}` — `quality` is the TIER that answered (`lossless` / `high` / `standard`), `bitrate` the measured kbps (0 when upstream does not say) |
-| `lyric`  | `{id, lrc, words}` — LRC document (`""` when the track has none) and the word-timed sheet: `[{start, duration, text, words: [{start, duration, text}]}]`, ms from track start, `[]` when upstream has no word timing |
+| `lyric`  | `{id, lrc, words}` — LRC document (`""` when the track has none) and the word-timed sheet: `[{start, duration, text, words: [{start, duration, text}]}]`, ms from track start, `[]` when upstream has no word timing. Optional `line_notes` / `word_notes`: `{translation?, romanization?}` LRC documents cued to `lrc` and to `words` respectively, absent when the track has none |
 | `whoami` | `{logged_in, nickname, vip}` — who `MUSICFOX_COOKIE` authenticates as; anonymous and rejected cookies both answer `logged_in: false` |
 | `playlists` | `[{id, title, cover, count, description}]` — the account's own shelf |
 | `playlist` | `[{id, title, artist, album, cover, duration}]` — the SAME row `search` publishes, so a shelf is playable and queueable without a second shape |

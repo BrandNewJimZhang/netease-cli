@@ -311,16 +311,18 @@ func runLyric(args []string) int {
 		failUpstream(rejected("lyric", code, body))
 		return exitUpstreamRefuse
 	}
-	lrc, words, err := mapLyricResponse(body)
+	lyric, err := mapLyricResponse(body)
 	if err != nil {
 		failUpstream(err.Error())
 		return exitUpstreamRefuse
 	}
-	return emit(Lyric{ID: *id, LRC: lrc, Words: words})
+	lyric.ID = *id
+	return emit(lyric)
 }
 
-// requestLyric asks the v1 lyric endpoint for one track: the LRC and the
-// word-timed yrc in one round trip. Spelled here rather than through the
+// requestLyric asks the v1 lyric endpoint for one track: the LRC, the
+// word-timed yrc, and both timelines' translation and romaji in one
+// round trip. Spelled here rather than through the
 // library's LyricService because that service is fixed to the older
 // /api/song/lyric, which never answers yrc, and takes no parameters to
 // ask for it. The field set is the desktop client's; "0" on each asks

@@ -152,23 +152,27 @@ func TestMapUrlResponseNullIsUpstreamRejection(t *testing.T) {
 }
 
 func TestMapLyricResponse(t *testing.T) {
-	lrc, _, err := mapLyricResponse([]byte(lyricFixture))
+	lyric, err := mapLyricResponse([]byte(lyricFixture))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if lrc != "[00:01.00]故事的小黄花\n[00:12.50]从出生那年" {
-		t.Errorf("lrc: got %q", lrc)
+	if lyric.LRC != "[00:01.00]故事的小黄花\n[00:12.50]从出生那年" {
+		t.Errorf("lrc: got %q", lyric.LRC)
 	}
 }
 
 func TestMapLyricResponseMissingIsEmpty(t *testing.T) {
 	// A track with no lyric is the common case, not a failure.
-	lrc, words, err := mapLyricResponse([]byte(`{"code":200}`))
+	lyric, err := mapLyricResponse([]byte(`{"code":200}`))
 	if err != nil {
 		t.Fatalf("missing lyric must not raise: %v", err)
 	}
+	lrc, words := lyric.LRC, lyric.Words
 	if lrc != "" {
 		t.Errorf("want empty lrc, got %q", lrc)
+	}
+	if lyric.LineNotes != nil || lyric.WordNotes != nil {
+		t.Errorf("want no notes, got %+v / %+v", lyric.LineNotes, lyric.WordNotes)
 	}
 	// Empty, not nil: the wire says "no word timing" as [], never null.
 	if words == nil || len(words) != 0 {
@@ -177,10 +181,11 @@ func TestMapLyricResponseMissingIsEmpty(t *testing.T) {
 }
 
 func TestMapLyricResponseCarriesTheWordSheet(t *testing.T) {
-	lrc, words, err := mapLyricResponse([]byte(wordLyricFixture))
+	lyric, err := mapLyricResponse([]byte(wordLyricFixture))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	lrc, words := lyric.LRC, lyric.Words
 	if lrc != "[00:22.31]都是勇敢的" {
 		t.Errorf("lrc: got %q", lrc)
 	}
@@ -202,6 +207,45 @@ func TestMapLyricResponseCarriesTheWordSheet(t *testing.T) {
 	}
 	if w := first.Words[4]; w.Start != 26020 || w.Duration != 590 || w.Text != "的" {
 		t.Errorf("last word: got %+v", w)
+	}
+}
+
+// The four note documents ride the same /api/song/lyric/v1 body. Each is
+// LRC, and each follows ONE timeline: tlyric/romalrc are cued to lrc,
+// ytlrc/yromalrc to the yrc lines (probed 2026-10-09, track 1897084229:
+// ytlrc 32/32 cues equal a yrc line start, tlyric 0/32 do).
+const notedLyricFixture = `{"lrc":{"lyric":"[00:03.84]x"},` +
+	`"tlyric":{"lyric":"[00:03.84]译"},"romalrc":{"lyric":"[00:03.84]ro"},` +
+	`"ytlrc":{"lyric":"[00:03.840]译"},"yromalrc":{"lyric":"[00:03.840]ro"},` +
+	`"code":200}`
+
+func TestMapLyricResponseForwardsTheNotesByTimeline(t *testing.T) {
+	lyric, err := mapLyricResponse([]byte(notedLyricFixture))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if lyric.LineNotes == nil || *lyric.LineNotes != (LyricNotes{Translation: "[00:03.84]译", Romanization: "[00:03.84]ro"}) {
+		t.Errorf("line notes: got %+v", lyric.LineNotes)
+	}
+	if lyric.WordNotes == nil || *lyric.WordNotes != (LyricNotes{Translation: "[00:03.840]译", Romanization: "[00:03.840]ro"}) {
+		t.Errorf("word notes: got %+v", lyric.WordNotes)
+	}
+}
+
+func TestLyricWireOmitsAbsentNotes(t *testing.T) {
+	// A note the track lacks is ABSENT on the wire, which is what the
+	// runner reads as "no note" -- the same reading it gives an older
+	// resolver that never published the field.
+	lyric, err := mapLyricResponse([]byte(`{"lrc":{"lyric":"[00:01]x"},"tlyric":{"lyric":"[00:01]y"},"romalrc":{"lyric":""}}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out, err := json.Marshal(lyric)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != `{"id":"","lrc":"[00:01]x","words":[],"line_notes":{"translation":"[00:01]y"}}` {
+		t.Errorf("wire: got %s", out)
 	}
 }
 
