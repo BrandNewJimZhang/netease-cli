@@ -9,7 +9,7 @@
 //
 // Contract (mirrored by the AutoSkill runner's tests):
 //   - stdout: {"schema_version":2,"data":<payload>}
-//   - stderr: one {"error_class","message"} line on failure
+//   - stderr: one {"error_class","message","detail"} line on failure
 //   - exit 0 ok / 3 bad input / 4 upstream refused
 //
 // A session is read from MUSICFOX_COOKIE (see cookie.go) and is exactly

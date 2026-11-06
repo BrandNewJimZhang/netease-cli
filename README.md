@@ -80,8 +80,13 @@ Every success prints one envelope on stdout:
 Failures print one line on stderr and exit non-zero:
 
 ```json
-{"error_class": "bad_input", "message": "--keyword is required"}
+{"error_class": "bad_input", "message": "--keyword is required", "detail": ""}
 ```
+
+`message` is the sentence a reader may see and never carries a document;
+`detail` is the raw upstream body (or transport text), capped at 300 runes.
+The `detail` key is always present so a caller can tell this shape from the
+older two-key envelope.
 
 | Exit | Meaning |
 |------|---------|
