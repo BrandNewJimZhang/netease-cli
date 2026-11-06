@@ -295,20 +295,26 @@ func TestEnvelopeCarriesSchemaVersion(t *testing.T) {
 }
 
 func TestErrorEnvelopeShape(t *testing.T) {
-	// stderr contract: one structured {"error_class","message"} line.
-	out, err := json.Marshal(newErrorEnvelope("upstream_rejected", "login expired"))
+	// stderr contract: one structured {"error_class","message","detail"}
+	// line. The detail key is ALWAYS present, even when empty, so a
+	// reader can tell this shape from the older two-key envelope.
+	out, err := json.Marshal(newErrorEnvelope("upstream_rejected", "login expired", ""))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	var probe struct {
-		ErrorClass string `json:"error_class"`
-		Message    string `json:"message"`
+		ErrorClass string  `json:"error_class"`
+		Message    string  `json:"message"`
+		Detail     *string `json:"detail"`
 	}
 	if err := json.Unmarshal(out, &probe); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if probe.ErrorClass != "upstream_rejected" || probe.Message != "login expired" {
 		t.Errorf("error envelope: got %+v", probe)
+	}
+	if probe.Detail == nil {
+		t.Error("the detail key must always be present")
 	}
 }
 
@@ -632,32 +638,67 @@ func TestRejectedCarriesTheBodyDetail(t *testing.T) {
 	// The library reports transport failures as sentinel code 520 with
 	// the underlying error text in the BODY (dns timeout, dial refused).
 	// Dropping it turns an actionable failure into a bare number.
-	msg := rejected("search", 520, []byte("lookup music.163.com: i/o timeout"))
+	msg, detail := rejected("search", 520, []byte("lookup music.163.com: i/o timeout"))
 	want := "search rejected with code 520: lookup music.163.com: i/o timeout"
 	if msg != want {
 		t.Errorf("want %q, got %q", want, msg)
 	}
+	if detail != "lookup music.163.com: i/o timeout" {
+		t.Errorf("detail: got %q", detail)
+	}
 }
 
 func TestRejectedWithoutBodyStaysBare(t *testing.T) {
-	msg := rejected("search", 404, []byte("  \n"))
+	msg, detail := rejected("search", 404, []byte("  \n"))
 	if msg != "search rejected with code 404" {
 		t.Errorf("got %q", msg)
+	}
+	if detail != "" {
+		t.Errorf("detail should be empty, got %q", detail)
+	}
+}
+
+func TestRejectedLiftsTheReaderSentenceFromTheBody(t *testing.T) {
+	// NetEase's risk-control page publishes the sentence it wants the
+	// user to read under data.blockText. It belongs in message; the
+	// document belongs in detail.
+	body := []byte(`{"code":-462,"data":{"blockText":"检测到您的网络环境存在风险，请稍后再试"}}`)
+	msg, detail := rejected("login qr mint", -462, body)
+	if !strings.HasSuffix(msg, "检测到您的网络环境存在风险，请稍后再试") {
+		t.Errorf("reader sentence missing from message: %q", msg)
+	}
+	if strings.ContainsAny(msg, "{}[]") {
+		t.Errorf("a document reached the message: %q", msg)
+	}
+	if detail != string(body) {
+		t.Errorf("detail must be the full body: got %q", detail)
+	}
+}
+
+func TestRejectedKeepsADocumentOutOfTheMessage(t *testing.T) {
+	// A body with no published reader text is diagnostic only.
+	body := []byte(`{"code":500,"retry":true}`)
+	msg, detail := rejected("search", 500, body)
+	if msg != "search rejected with code 500" {
+		t.Errorf("got %q", msg)
+	}
+	if detail != string(body) {
+		t.Errorf("detail: got %q", detail)
 	}
 }
 
 func TestRejectedTruncatesOversizedBodies(t *testing.T) {
-	// A real HTTP error body can be a whole HTML page; the envelope
-	// message stays one readable line.
+	// A real HTTP error body can be a whole HTML page; the detail stays
+	// one readable line, rune-safely.
 	long := strings.Repeat("宽", 400)
-	msg := rejected("search", 502, []byte(long))
-	if utf8.RuneCountInString(msg) >= utf8.RuneCountInString("search rejected with code 502: ")+400 {
-		t.Errorf("body was not truncated: %d runes", utf8.RuneCountInString(msg))
+	msg, detail := rejected("search", 502, []byte(long))
+	if utf8.RuneCountInString(detail) > 301 { // 300 + the ellipsis
+		t.Errorf("detail was not truncated: %d runes", utf8.RuneCountInString(detail))
 	}
-	if !strings.HasSuffix(msg, "…") {
-		t.Errorf("truncation must be visible, got tail %q", msg[len(msg)-12:])
+	if !strings.HasSuffix(detail, "…") {
+		t.Errorf("truncation must be visible, got tail %q", detail[len(detail)-12:])
 	}
-	if !utf8.ValidString(msg) {
+	if !utf8.ValidString(detail) || !utf8.ValidString(msg) {
 		t.Error("truncation split a rune")
 	}
 }

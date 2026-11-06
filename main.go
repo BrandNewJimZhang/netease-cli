@@ -59,8 +59,9 @@ usage:
   netease-cli refresh [--format json]
 
 Every verb prints {"schema_version":2,"data":...} on stdout. Failures
-print {"error_class","message"} on stderr and exit 3 (bad input) or
-4 (upstream refused).`
+print ONE {"error_class","message","detail"} line on stderr and exit 3
+(bad input) or 4 (upstream refused). "message" is the sentence a reader
+may see; "detail" is the raw upstream body, capped at 300 runes.`
 
 // silenceUpstreamLogger points the standard logger at io.Discard.
 //
@@ -79,7 +80,9 @@ func silenceUpstreamLogger() {
 func main() {
 	silenceUpstreamLogger()
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, usage)
+		// One envelope line, like every other failure: a caller parsing
+		// stderr must never have to special-case the no-argument path.
+		failInput(usage)
 		os.Exit(exitBadInput)
 	}
 	if err := applyCookieEnv(); err != nil {
@@ -139,8 +142,8 @@ func emit(data any) int {
 	return exitOK
 }
 
-func failWith(class, message string) {
-	out, err := json.Marshal(newErrorEnvelope(class, message))
+func failWith(class, message, detail string) {
+	out, err := json.Marshal(newErrorEnvelope(class, message, detail))
 	if err != nil {
 		// Last resort: the structured channel itself is broken.
 		fmt.Fprintln(os.Stderr, message)
@@ -149,8 +152,23 @@ func failWith(class, message string) {
 	fmt.Fprintln(os.Stderr, string(out))
 }
 
-func failInput(message string)    { failWith("bad_input", message) }
-func failUpstream(message string) { failWith("upstream_rejected", message) }
+func failInput(message string) { failWith("bad_input", message, "") }
+func failUpstream(message string) {
+	failWith("upstream_rejected", message, "")
+}
+func failUpstreamDetail(message, detail string) {
+	failWith("upstream_rejected", message, detail)
+}
+
+// newFlagSet is the ONE constructor for a verb's parser. Its output is
+// discarded so a parse failure is reported ONLY through our envelope:
+// the flag package would otherwise print the error and the usage text
+// first, and a caller reading stderr as JSON would lose the class.
+func newFlagSet(name string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	return fs
+}
 
 // formatFlag registers the --format flag every verb accepts. JSON is
 // the only format: the flag exists so the caller's argv is explicit
@@ -167,7 +185,7 @@ func checkFormat(format string) error {
 }
 
 func runSearch(args []string) int {
-	fs := flag.NewFlagSet("search", flag.ContinueOnError)
+	fs := newFlagSet("search")
 	keyword := fs.String("keyword", "", "search text (required)")
 	limit := fs.Int("limit", 20, "maximum rows")
 	format := formatFlag(fs)
@@ -195,7 +213,8 @@ func runSearch(args []string) int {
 	}
 	code, body := svc.Search()
 	if code != 200 {
-		failUpstream(rejected("search", code, body))
+		message, detail := rejected("search", code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	tracks, err := mapSearchResponse(body)
@@ -207,7 +226,7 @@ func runSearch(args []string) int {
 }
 
 func runURL(args []string) int {
-	fs := flag.NewFlagSet("url", flag.ContinueOnError)
+	fs := newFlagSet("url")
 	id := fs.String("id", "", "track id (required)")
 	quality := fs.String("quality", "", "tier: lossless / high / standard")
 	format := formatFlag(fs)
@@ -247,7 +266,8 @@ func runURL(args []string) int {
 		}
 		code, body := svc.SongUrl()
 		if code != 200 {
-			failUpstream(rejected("url", code, body))
+			message, detail := rejected("url", code, body)
+			failUpstreamDetail(message, detail)
 			return exitUpstreamRefuse
 		}
 		resolved, err := mapUrlResponse(body, tier)
@@ -264,7 +284,7 @@ func runURL(args []string) int {
 }
 
 func runWhoami(args []string) int {
-	fs := flag.NewFlagSet("whoami", flag.ContinueOnError)
+	fs := newFlagSet("whoami")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		failInput(err.Error())
@@ -278,7 +298,8 @@ func runWhoami(args []string) int {
 	svc := &service.UserAccountService{}
 	code, body := svc.AccountInfo()
 	if code != 200 {
-		failUpstream(rejected("account", code, body))
+		message, detail := rejected("account", code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	session, err := mapAccountResponse(body)
@@ -290,7 +311,7 @@ func runWhoami(args []string) int {
 }
 
 func runLyric(args []string) int {
-	fs := flag.NewFlagSet("lyric", flag.ContinueOnError)
+	fs := newFlagSet("lyric")
 	id := fs.String("id", "", "track id (required)")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
@@ -308,7 +329,8 @@ func runLyric(args []string) int {
 
 	code, body := requestLyric(*id)
 	if code != 200 {
-		failUpstream(rejected("lyric", code, body))
+		message, detail := rejected("lyric", code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	lyric, err := mapLyricResponse(body)

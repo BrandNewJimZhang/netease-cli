@@ -120,15 +120,21 @@ type envelope struct {
 
 type errorEnvelope struct {
 	ErrorClass string `json:"error_class"`
-	Message    string `json:"message"`
+	// Message is the sentence a reader may see. It never carries a
+	// document: the upstream body belongs to Detail.
+	Message string `json:"message"`
+	// Detail is the raw upstream body (or transport text), capped at
+	// one readable line. The key is always present so a reader can tell
+	// this contract from the older {error_class,message} shape.
+	Detail string `json:"detail"`
 }
 
 func newEnvelope(data any) envelope {
 	return envelope{SchemaVersion: SchemaVersion, Data: data}
 }
 
-func newErrorEnvelope(class, message string) errorEnvelope {
-	return errorEnvelope{ErrorClass: class, Message: message}
+func newErrorEnvelope(class, message, detail string) errorEnvelope {
+	return errorEnvelope{ErrorClass: class, Message: message, Detail: detail}
 }
 
 // upstreamSong is the per-song object NetEase repeats across every
@@ -490,20 +496,82 @@ func mapQRStatusResponse(body []byte) (string, error) {
 	return state, nil
 }
 
-// rejected names an upstream refusal, carrying the detail the library
-// put in the BODY. Transport failures never reach a status line: the
-// library reports them as sentinel code 520 whose body is the
-// underlying error text (dns timeout, dial refused, tls reset), so a
-// message without the body turns an actionable failure into a bare
-// number. Real HTTP error bodies can be whole pages — the detail is
-// truncated to one readable line, rune-safely.
-func rejected(what string, code float64, body []byte) string {
-	detail := strings.TrimSpace(string(body))
-	if runes := []rune(detail); len(runes) > 300 {
-		detail = string(runes[:300]) + "…"
+// rejected names an upstream refusal as two facts: the sentence a reader
+// may see, and the raw body for diagnosis.
+//
+// Transport failures never reach a status line: the library reports them
+// as sentinel code 520 whose body is the underlying error text (dns
+// timeout, dial refused, tls reset), so dropping the body would turn an
+// actionable failure into a bare number. Real HTTP error bodies can be
+// whole documents or pages, which are diagnostic material, not
+// sentences — so a reader sentence is extracted from the FULL body
+// before the detail is capped, and a document with nothing readable
+// leaves the sentence bare.
+func rejected(what string, code float64, body []byte) (message, detail string) {
+	full := strings.TrimSpace(string(body))
+	detail = truncateRunes(full, 300)
+	message = fmt.Sprintf("%s rejected with code %v", what, code)
+	if sentence := readerSentence(full); sentence != "" {
+		message += ": " + sentence
 	}
-	if detail == "" {
-		return fmt.Sprintf("%s rejected with code %v", what, code)
+	return message, detail
+}
+
+// refusalError carries both halves of an upstream refusal through a
+// helper that cannot write to stderr itself (currentUserID).
+type refusalError struct {
+	message string
+	detail  string
+}
+
+func (e *refusalError) Error() string { return e.message }
+
+// readerSentence is the sentence the upstream published for a reader, or
+// "" when the body is a document with none. Only the known reader fields
+// are read: a document is never the answer.
+func readerSentence(body string) string {
+	trimmed := strings.TrimSpace(body)
+	if trimmed == "" {
+		return ""
 	}
-	return fmt.Sprintf("%s rejected with code %v: %s", what, code, detail)
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+		return jsonReaderSentence(trimmed)
+	}
+	// A transport error's body IS the actionable text; a page is not.
+	first := strings.TrimSpace(strings.SplitN(trimmed, "\n", 2)[0])
+	if first == "" || strings.HasPrefix(first, "<") {
+		return ""
+	}
+	return truncateRunes(first, 300)
+}
+
+// jsonReaderSentence lifts NetEase's reader text out of a JSON body.
+// data.blockText is the risk-control page's own sentence; the wrapper
+// keys cover the other upstream error shapes.
+func jsonReaderSentence(body string) string {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(body), &document); err != nil {
+		return ""
+	}
+	if data, ok := document["data"].(map[string]any); ok {
+		if text, ok := data["blockText"].(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	for _, key := range []string{"blockText", "message", "msg"} {
+		if text, ok := document[key].(string); ok && strings.TrimSpace(text) != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
+}
+
+// truncateRunes caps text at max runes, rune-safely, with a visible
+// ellipsis.
+func truncateRunes(text string, max int) string {
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	return string(runes[:max]) + "…"
 }

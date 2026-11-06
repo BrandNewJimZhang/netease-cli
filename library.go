@@ -12,7 +12,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"strconv"
 
@@ -29,7 +28,8 @@ func currentUserID() (string, error) {
 	svc := &service.UserAccountService{}
 	code, body := svc.AccountInfo()
 	if code != 200 {
-		return "", fmt.Errorf("%s", rejected("account", code, body))
+		message, detail := rejected("account", code, body)
+		return "", &refusalError{message: message, detail: detail}
 	}
 	var parsed struct {
 		Profile *struct {
@@ -52,7 +52,7 @@ var errAnonymous = errors.New("this verb is account-scoped; sign in with 'login 
 
 // runPlaylists publishes the account's own shelf.
 func runPlaylists(args []string) int {
-	fs := flag.NewFlagSet("playlists", flag.ContinueOnError)
+	fs := newFlagSet("playlists")
 	limit := fs.Int("limit", 50, "maximum shelf entries")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
@@ -69,17 +69,23 @@ func runPlaylists(args []string) int {
 	}
 	uid, err := currentUserID()
 	if errors.Is(err, errAnonymous) {
-		failWith("credential_missing", err.Error())
+		failWith("credential_missing", err.Error(), "")
 		return exitBadInput
 	}
 	if err != nil {
-		failUpstream(err.Error())
+		var refusal *refusalError
+		if errors.As(err, &refusal) {
+			failUpstreamDetail(refusal.message, refusal.detail)
+		} else {
+			failUpstream(err.Error())
+		}
 		return exitUpstreamRefuse
 	}
 	svc := &service.UserPlaylistService{Uid: uid, Limit: strconv.Itoa(*limit)}
 	code, body := svc.UserPlaylist()
 	if code != 200 {
-		failUpstream(rejected("playlist shelf", code, body))
+		message, detail := rejected("playlist shelf", code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	lists, err := mapUserPlaylistResponse(body)
@@ -92,7 +98,7 @@ func runPlaylists(args []string) int {
 
 // runPlaylist publishes one playlist's tracks.
 func runPlaylist(args []string) int {
-	fs := flag.NewFlagSet("playlist", flag.ContinueOnError)
+	fs := newFlagSet("playlist")
 	id := fs.String("id", "", "playlist id (required)")
 	// Accepted for argv parity with qq-cli, whose upstream pages its
 	// detail call. NetEase's assembles the whole shelf in one go — there
@@ -119,7 +125,8 @@ func runPlaylist(args []string) int {
 	svc := &service.PlaylistTrackAllService{Id: *id}
 	code, body := svc.AllTracks()
 	if code != 200 {
-		failUpstream(rejected(fmt.Sprintf("playlist %s", *id), code, body))
+		message, detail := rejected(fmt.Sprintf("playlist %s", *id), code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	tracks, err := mapPlaylistTracksResponse(body)
@@ -135,7 +142,7 @@ func runPlaylist(args []string) int {
 
 // runDaily publishes today's recommended tracks.
 func runDaily(args []string) int {
-	fs := flag.NewFlagSet("daily", flag.ContinueOnError)
+	fs := newFlagSet("daily")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		failInput(err.Error())
@@ -146,13 +153,14 @@ func runDaily(args []string) int {
 		return exitBadInput
 	}
 	if !cookieEnvIsSet() {
-		failWith("credential_missing", errAnonymous.Error())
+		failWith("credential_missing", errAnonymous.Error(), "")
 		return exitBadInput
 	}
 	svc := &service.RecommendSongsService{}
 	code, body := svc.RecommendSongs()
 	if code != 200 {
-		failUpstream(rejected("daily recommendations", code, body))
+		message, detail := rejected("daily recommendations", code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	tracks, err := mapDailySongsResponse(body)

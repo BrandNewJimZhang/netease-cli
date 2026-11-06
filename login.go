@@ -16,8 +16,8 @@ package main
 
 import (
 	"encoding/base64"
-	"flag"
 	"fmt"
+	"strings"
 
 	"github.com/go-musicfox/netease-music/service"
 	qrcode "github.com/skip2/go-qrcode"
@@ -71,7 +71,7 @@ func encodeQRImage(loginURL string) (string, error) {
 
 // runLoginStart mints a login code.
 func runLoginStart(args []string) int {
-	fs := flag.NewFlagSet("login start", flag.ContinueOnError)
+	fs := newFlagSet("login start")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		failInput(err.Error())
@@ -88,7 +88,8 @@ func runLoginStart(args []string) int {
 		return exitUpstreamRefuse
 	}
 	if code != 200 || qr.UniKey == "" {
-		failUpstream(rejected("login qr mint", code, body))
+		message, detail := rejected("login qr mint", code, body)
+		failUpstreamDetail(message, detail)
 		return exitUpstreamRefuse
 	}
 	image, err := encodeQRImage(loginURL)
@@ -107,7 +108,7 @@ func runLoginStart(args []string) int {
 // runLoginPoll checks one minted code, publishing the credential once
 // the scan is authorised.
 func runLoginPoll(args []string) int {
-	fs := flag.NewFlagSet("login poll", flag.ContinueOnError)
+	fs := newFlagSet("login poll")
 	identifier := fs.String("identifier", "", "the token 'login start' published")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
@@ -154,7 +155,7 @@ func runLoginPoll(args []string) int {
 // Set-Cookie headers rather than a new document, so the published
 // credential is read back out of the jar the same way a login's is.
 func runRefresh(args []string) int {
-	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
+	fs := newFlagSet("refresh")
 	format := formatFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		failInput(err.Error())
@@ -165,7 +166,11 @@ func runRefresh(args []string) int {
 		return exitBadInput
 	}
 	if !cookieEnvIsSet() {
-		failWith("credential_missing", fmt.Sprintf("nothing to refresh: %s is not set", cookieEnvVar))
+		failWith(
+			"credential_missing",
+			fmt.Sprintf("nothing to refresh: %s is not set", cookieEnvVar),
+			"",
+		)
 		return exitBadInput
 	}
 	refresh := &service.LoginRefreshService{}
@@ -178,8 +183,12 @@ func runRefresh(args []string) int {
 		// 301 is upstream's "this session is past renewal" — reported by
 		// its own class so a caller does not retry a login that can only
 		// be replaced by signing in again.
-		failWith("credential_expired", fmt.Sprintf(
-			"NetEase refused to renew this session (code %v): %s", code, string(body)))
+		raw := strings.TrimSpace(string(body))
+		message := fmt.Sprintf("NetEase refused to renew this session (code %v)", code)
+		if sentence := readerSentence(raw); sentence != "" {
+			message += ": " + sentence
+		}
+		failWith("credential_expired", message, truncateRunes(raw, 300))
 		return exitUpstreamRefuse
 	}
 	cookie, err := sessionCookieHeader()
