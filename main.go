@@ -82,7 +82,9 @@ func main() {
 	if len(os.Args) < 2 {
 		// One envelope line, like every other failure: a caller parsing
 		// stderr must never have to special-case the no-argument path.
-		failInput(usage)
+		// The message is a sentence, not the usage block (which --help
+		// prints to stdout).
+		failInput("a command is required; pass --help for usage")
 		os.Exit(exitBadInput)
 	}
 	if err := applyCookieEnv(); err != nil {
