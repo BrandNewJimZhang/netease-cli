@@ -101,10 +101,13 @@ netease-cli refresh
   曲库，把会话导出到 `MUSICFOX_COOKIE`（Cookie 头字符串，如
   `MUSIC_U=...`）；本 CLI 解析后将其安装为请求会话。这个字符串正是
   `login poll` 在 `done` 时发布、`refresh` 再次发布的内容 —— 一种
-  格式，一个来回，没有需要转换的第二种形状。
+  格式，一个来回，没有需要转换的第二种形状。它只承载**会话**材料：
+  上游库按请求注入的策略 Cookie（`os`、`NMTID`）不会被持久化。
 - **扫码登录。** `login start` 铸造二维码并发布其 `identifier`；
-  `login poll` 对该 identifier 查询一次。identifier 就是轮询状态的
-  全部，所以两个动词可以作为独立进程运行，调用方按自己的节奏轮询。
+  `login poll` 对该 identifier 查询一次。两个动词都不读取
+  `MUSICFOX_COOKIE`：即使已存有另一个（哪怕已过期的）会话，也可以
+  直接重新扫码，因为铸码是匿名的。identifier 就是轮询状态的全部，
+  所以两个动词可以作为独立进程运行，调用方按自己的节奏轮询。
   轮询直到 `done`（保存凭据）或 `expired`（重新铸码）。网易没有独立
   的「用户拒绝」状态 —— 拒绝只会让码自然过期 —— 所以 qq-cli 可能
   发布的 `refused` 状态在这里永不出现。

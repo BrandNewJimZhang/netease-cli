@@ -6,10 +6,14 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/go-musicfox/netease-music/util"
 )
 
 // Fixtures are trimmed captures of real NetEase responses (probed
@@ -415,6 +419,145 @@ func TestRenderCookieHeaderRoundTripsThroughTheParser(t *testing.T) {
 	}
 	if len(parsed) != 1 || parsed[0].Name != "MUSIC_U" || parsed[0].Value != "abc" {
 		t.Errorf("round trip lost the session: %+v", parsed)
+	}
+}
+
+func resetTestSessionJar(t *testing.T) http.CookieJar {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookie jar: %v", err)
+	}
+	util.SetGlobalCookieJar(jar)
+	return jar
+}
+
+func jarCookieNames(t *testing.T, jar http.CookieJar) map[string]bool {
+	t.Helper()
+	base, err := url.Parse("https://music.163.com")
+	if err != nil {
+		t.Fatalf("base url: %v", err)
+	}
+	names := map[string]bool{}
+	for _, cookie := range jar.Cookies(base) {
+		names[cookie.Name] = true
+	}
+	return names
+}
+
+func TestInstallSessionSkipsTheLoginLifecycle(t *testing.T) {
+	// The mint is how a session is obtained; installing the stored one
+	// is what made NetEase answer the second scan with -462.
+	t.Setenv(cookieEnvVar, "MUSIC_U=old; os=pc")
+	resetTestSessionJar(t)
+
+	if err := installSession("login"); err != nil {
+		t.Fatalf("login must ignore the exported session: %v", err)
+	}
+	if jarCookieNames(t, util.GetGlobalCookieJar())["MUSIC_U"] {
+		t.Fatal("login installed the exported session")
+	}
+}
+
+func TestInstallSessionKeepsTheSessionForReadVerbs(t *testing.T) {
+	t.Setenv(cookieEnvVar, "MUSIC_U=old")
+	resetTestSessionJar(t)
+
+	if err := installSession("search"); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if !jarCookieNames(t, util.GetGlobalCookieJar())["MUSIC_U"] {
+		t.Fatal("a read verb lost the exported session")
+	}
+}
+
+func TestLoginIgnoresAMalformedExportedSession(t *testing.T) {
+	// A damaged credential must not make signing in impossible; the read
+	// verbs still refuse it by name.
+	t.Setenv(cookieEnvVar, "MUSIC_U")
+	resetTestSessionJar(t)
+
+	if err := installSession("login"); err != nil {
+		t.Fatalf("login must not read the credential: %v", err)
+	}
+	if err := installSession("search"); err == nil {
+		t.Fatal("a read verb must refuse a malformed credential")
+	}
+}
+
+func TestApplyCookieEnvDropsRequestStrategyCookies(t *testing.T) {
+	t.Setenv(cookieEnvVar, "os=pc; NMTID=x; MUSIC_U=abc; __csrf=xyz; sDeviceId=dev")
+	resetTestSessionJar(t)
+
+	if err := applyCookieEnv(); err != nil {
+		t.Fatalf("applyCookieEnv: %v", err)
+	}
+	names := jarCookieNames(t, util.GetGlobalCookieJar())
+	for _, banned := range []string{"os", "NMTID"} {
+		if names[banned] {
+			t.Errorf("request-strategy cookie %s reached the session jar", banned)
+		}
+	}
+	for _, want := range []string{"MUSIC_U", "__csrf", "sDeviceId"} {
+		if !names[want] {
+			t.Errorf("session cookie %s was dropped", want)
+		}
+	}
+}
+
+func TestApplyCookieEnvRefusesACredentialWithNoSessionCookie(t *testing.T) {
+	t.Setenv(cookieEnvVar, "os=pc; NMTID=x")
+	resetTestSessionJar(t)
+
+	if err := applyCookieEnv(); err == nil {
+		t.Fatal("a credential carrying only request-strategy cookies must be refused")
+	}
+}
+
+func TestSessionCookieHeaderDropsRequestStrategyCookies(t *testing.T) {
+	jar := resetTestSessionJar(t)
+	base, err := url.Parse("https://music.163.com")
+	if err != nil {
+		t.Fatalf("base url: %v", err)
+	}
+	jar.SetCookies(base, []*http.Cookie{
+		{Name: "sDeviceId", Value: "dev"},
+		{Name: "os", Value: "pc"},
+		{Name: "NMTID", Value: "x"},
+		{Name: "MUSIC_U", Value: "abc"},
+		{Name: "__csrf", Value: "xyz"},
+	})
+
+	header, err := sessionCookieHeader()
+	if err != nil {
+		t.Fatalf("sessionCookieHeader: %v", err)
+	}
+	for _, banned := range []string{"os=", "NMTID="} {
+		if strings.Contains(header, banned) {
+			t.Errorf("published credential carries request-strategy cookie %q: %q", banned, header)
+		}
+	}
+	for _, want := range []string{"sDeviceId=dev", "MUSIC_U=abc", "__csrf=xyz"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("published credential lost %q: %q", want, header)
+		}
+	}
+}
+
+func TestApplyCookieEnvKeepsUnknownCookies(t *testing.T) {
+	// A denylist, not an allowlist: an upstream session cookie this
+	// binary has never heard of must survive a login.
+	t.Setenv(cookieEnvVar, "MUSIC_A=token; foo=bar")
+	resetTestSessionJar(t)
+
+	if err := applyCookieEnv(); err != nil {
+		t.Fatalf("applyCookieEnv: %v", err)
+	}
+	names := jarCookieNames(t, util.GetGlobalCookieJar())
+	for _, want := range []string{"MUSIC_A", "foo"} {
+		if !names[want] {
+			t.Errorf("unknown cookie %s was dropped", want)
+		}
 	}
 }
 

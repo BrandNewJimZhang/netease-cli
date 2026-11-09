@@ -12,8 +12,10 @@
 //   - stderr: one {"error_class","message","detail"} line on failure
 //   - exit 0 ok / 3 bad input / 4 upstream refused
 //
-// A session is read from MUSICFOX_COOKIE (see cookie.go) and is exactly
-// what `login poll` publishes on success — one format, one round trip.
+// A session is read from MUSICFOX_COOKIE (see cookie.go) by every verb
+// EXCEPT the login lifecycle: `login start` / `login poll` obtain a
+// session rather than use one, so they never read it. A published
+// credential is session material only — one format, one round trip.
 //
 // Not implemented on purpose: UnblockNeteaseMusic (SkipUNM is always
 // true — this tool plays what your account may already play, and does
@@ -87,7 +89,7 @@ func main() {
 		failInput("a command is required; pass --help for usage")
 		os.Exit(exitBadInput)
 	}
-	if err := applyCookieEnv(); err != nil {
+	if err := installSession(os.Args[1]); err != nil {
 		failInput(err.Error())
 		os.Exit(exitBadInput)
 	}

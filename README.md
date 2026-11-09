@@ -109,10 +109,14 @@ older two-key envelope.
   this CLI parses it and installs it as the request session. That string
   is exactly what `login poll` publishes on `done` and what `refresh`
   republishes — one format, one round trip, no second shape to convert.
+  It carries SESSION material only: the request-strategy cookies the
+  upstream library injects per call (`os`, `NMTID`) are not persisted.
 - **QR login.** `login start` mints a code and publishes its
-  `identifier`; `login poll` checks that identifier once. The identifier
-  is the whole of the poll state, so the two verbs run as separate
-  processes and the caller polls on its own schedule. Poll until `done`
+  `identifier`; `login poll` checks that identifier once. Neither verb
+  reads `MUSICFOX_COOKIE`: a login can be started while another session
+  is stored, even an expired one, because the mint is anonymous. The
+  identifier is the whole of the poll state, so the two verbs run as
+  separate processes and the caller polls on its own schedule. Poll until `done`
   (store the credential) or `expired` (mint a new code). NetEase has no
   distinct "user refused" code — a refusal simply lets the code expire —
   so the `refused` state qq-cli can publish never appears here.
