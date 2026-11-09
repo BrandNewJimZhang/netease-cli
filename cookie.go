@@ -100,7 +100,9 @@ func installSession(verb string) error {
 //
 // Request-strategy cookies are dropped on the way in: a credential is
 // session material, and a persisted os=pc without its appver is the
-// exact client shape NetEase's QR mint refuses with -462.
+// exact client shape NetEase's QR mint refuses with -462. A string left
+// with no session is anonymous, not a fault: the read verbs still work
+// and whoami lets the caller clear the store.
 func applyCookieEnv() error {
 	raw := strings.TrimSpace(os.Getenv(cookieEnvVar))
 	if raw == "" {
@@ -112,7 +114,7 @@ func applyCookieEnv() error {
 	}
 	cookies = withoutRequestStrategy(cookies)
 	if len(cookies) == 0 {
-		return fmt.Errorf("%s carries no session cookie", cookieEnvVar)
+		return nil
 	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -157,9 +159,6 @@ func sessionCookieHeader() (string, error) {
 		return "", fmt.Errorf("cannot parse netease base url: %w", err)
 	}
 	jar := util.GetGlobalCookieJar()
-	if jar == nil {
-		return "", fmt.Errorf("no cookie jar after authorisation")
-	}
 	header := renderCookieHeader(withoutRequestStrategy(jar.Cookies(base)))
 	if header == "" {
 		return "", fmt.Errorf("authorisation left no session cookies in the jar")

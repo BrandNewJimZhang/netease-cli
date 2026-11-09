@@ -505,12 +505,21 @@ func TestApplyCookieEnvDropsRequestStrategyCookies(t *testing.T) {
 	}
 }
 
-func TestApplyCookieEnvRefusesACredentialWithNoSessionCookie(t *testing.T) {
+func TestApplyCookieEnvTreatsAStrategyOnlyCredentialAsAnonymous(t *testing.T) {
+	// A string that only ever carried request-strategy cookies is not a
+	// credential: leaving the process anonymous lets the read verbs keep
+	// working and lets whoami tell the caller to clear the store.
 	t.Setenv(cookieEnvVar, "os=pc; NMTID=x")
 	resetTestSessionJar(t)
 
-	if err := applyCookieEnv(); err == nil {
-		t.Fatal("a credential carrying only request-strategy cookies must be refused")
+	if err := applyCookieEnv(); err != nil {
+		t.Fatalf("a strategy-only credential is anonymous, not a fault: %v", err)
+	}
+	names := jarCookieNames(t, util.GetGlobalCookieJar())
+	for _, banned := range []string{"os", "NMTID"} {
+		if names[banned] {
+			t.Errorf("request-strategy cookie %s reached the session jar", banned)
+		}
 	}
 }
 
